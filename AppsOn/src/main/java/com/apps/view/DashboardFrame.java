@@ -10,7 +10,7 @@ public DashboardFrame() {
     initComponents();
 
     javax.swing.Timer timer = new javax.swing.Timer(1500, e -> {
-        CasierFrame kasir = new CasierFrame(); // Pastikan ejaan sama dengan nama file Anda: CasierFrame
+        CasierFrame kasir = new CasierFrame();
         kasir.setLocationRelativeTo(null);
         kasir.setVisible(true);
         this.dispose();
