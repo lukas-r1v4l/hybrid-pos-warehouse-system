@@ -31,6 +31,25 @@ def main():
             sec.it_approve_ip(sys.argv[2])
             print("OK")
             return
+        elif action == "IT_LOGIN":
+            res = sec.verify_it_credentials(sys.argv[2], sys.argv[3])
+            if res == "OK":
+                sec.log_event("IT_CONSOLE_LOGIN", f"IT Administrator '{sys.argv[2]}' logged into IT Security Console.")
+                print("OK")
+            else:
+                sec.log_event("IT_LOGIN_FAILED", f"Failed IT Console login for '{sys.argv[2]}': {res}")
+                print(res)
+            return
+        elif action == "IT_GET_DEVICES":
+            print(sec.get_all_devices())
+            return
+        elif action == "IT_REVOKE_IP":
+            sec.revoke_device_ip(sys.argv[2])
+            print("OK")
+            return
+        elif action == "IT_GET_LOGS":
+            print(sec.get_security_logs())
+            return
         elif action == "LOGIN":
             auth_res = sec.authentication_user(sys.argv[2], sys.argv[3])
             if auth_res.startswith("OK|"):

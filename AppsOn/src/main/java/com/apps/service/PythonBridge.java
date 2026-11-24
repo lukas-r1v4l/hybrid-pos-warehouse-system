@@ -15,10 +15,13 @@ public class PythonBridge {
     public static String SESSION_TOKEN = "";
 
     private static final Set<String> PUBLIC_ACTIONS = Set.of(
-        "SIGNUP_EMPLOYEE", "SIGNUP_OWNER", "DELETE_OWNER", "IT_APPROVE_IP", "LOGIN"
+        "SIGNUP_EMPLOYEE", "SIGNUP_OWNER", "DELETE_OWNER", "IT_APPROVE_IP", "LOGIN",
+        "IT_LOGIN", "IT_GET_DEVICES", "IT_REVOKE_IP", "IT_GET_LOGS"
     );
+
     private static final Set<String> ALLOWED_ACTIONS = Set.of(
         "SIGNUP_EMPLOYEE", "SIGNUP_OWNER", "DELETE_OWNER", "IT_APPROVE_IP", "LOGIN",
+        "IT_LOGIN", "IT_GET_DEVICES", "IT_REVOKE_IP", "IT_GET_LOGS",
         "CHECK", "RESTOCK", "NEW_PRODUCT", "DELETE_STOCK", "DELETE_ITEM", "VERIFY_MANAGER", "TRANSACTION"
     );
 

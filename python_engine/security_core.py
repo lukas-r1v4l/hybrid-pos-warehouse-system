@@ -249,3 +249,44 @@ class SecurityManager(DatabaseManager):
             "device_id": self.get_current_device_id(),
             "detail": detail
         })
+
+    @staticmethod
+    def verify_it_credentials(it_user, it_pass):
+        from pymongo import MongoClient
+        from urllib.parse import urlparse, quote_plus
+        try:
+            raw_url = os.getenv("MONGO_URL", "mongodb://127.0.0.1:27017/?authSource=admin")
+            parsed = urlparse(raw_url)
+            host = parsed.hostname or "127.0.0.1"
+            port = parsed.port or 27017
+            query = f"?{parsed.query}" if parsed.query else "?authSource=admin"
+
+            test_uri = f"mongodb://{quote_plus(it_user)}:{quote_plus(it_pass)}@{host}:{port}/{query}"
+            test_client = MongoClient(test_uri, serverSelectionTimeoutMS=3000)
+            test_client.admin.command("ping")
+            test_client.close()
+            return "OK"
+        except Exception as e:
+            return f"FAIL|{str(e)}"
+    def get_all_devices(self):
+        devices = list(self.authorized_devices.find({}, {"_id": 0}))
+        lines = []
+        for d in devices:
+            lines.append(
+                f"{d.get('ip_address', '-')}|{d.get('device_id', '-')}|{d.get('device_name', '-')}|{d.get('requested_by', '-')}|{d.get('status', '-')}"
+            )
+        return "\n".join(lines) if lines else "EMPTY"
+    def revoke_device_ip(self, target_ip):
+        self.authorized_devices.update_many(
+            {"ip_address": target_ip},
+            {"$set": {"status": "REVOKED_BY_IT", "revoked_at": datetime.now()}}
+        )
+        self.log_event("IT_IP_REVOKED", f"IT Administrator revoked server access for IP {target_ip}.")
+        return True
+    def get_security_logs(self):
+        logs = list(self.security_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(50))
+        lines = []
+        for l in logs:
+            ts = str(l.get("timestamp", ""))[:19]
+            lines.append(f"{ts}|{l.get('event', '-')}|{l.get('ip_address', '-')}|{l.get('detail', '-')}")
+        return "\n".join(lines) if lines else "EMPTY"

@@ -23,10 +23,11 @@ public class LogInFrame extends javax.swing.JFrame {
     private JButton btnLogin;
     private JButton btnSignUp;
     private JButton btnOwnerPortal;
+    private JButton btnITConsole;
 
     public LogInFrame() {
         setTitle("POS & Warehouse System - Authentication");
-        setSize(420, 300);
+        setSize(420, 330);
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
         setLayout(null);
@@ -64,7 +65,7 @@ public class LogInFrame extends javax.swing.JFrame {
         btnLogin.setCursor(new Cursor(Cursor.HAND_CURSOR));
         add(btnLogin);
 
-        // Button Sign Up (Employee)
+        // Button Sign Up (Employee) - Wajib diinisialisasi sebelum addActionListener
         btnSignUp = new JButton("Sign Up");
         btnSignUp.setBounds(250, 155, 95, 34);
         btnSignUp.setBackground(new Color(22, 163, 74));
@@ -80,11 +81,19 @@ public class LogInFrame extends javax.swing.JFrame {
         btnOwnerPortal.setCursor(new Cursor(Cursor.HAND_CURSOR));
         add(btnOwnerPortal);
 
+        // Button IT Server Console
+        btnITConsole = new JButton("IT Server & Security Console");
+        btnITConsole.setBounds(145, 238, 200, 28);
+        btnITConsole.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        btnITConsole.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        add(btnITConsole);
+
         // Action Listeners
         btnLogin.addActionListener(e -> handleLogin());
         txtPassword.addActionListener(e -> handleLogin());
         btnSignUp.addActionListener(e -> handleEmployeeSignUp());
         btnOwnerPortal.addActionListener(e -> new OwnerSetupFrame().setVisible(true));
+        btnITConsole.addActionListener(e -> ITAdminFrame.openWithITLogin(this));
     }
 
     private void handleLogin() {
@@ -104,7 +113,7 @@ public class LogInFrame extends javax.swing.JFrame {
             PythonBridge.SESSION_TOKEN = parts[2];
 
             if (parts.length > 3 && parts[3].startsWith("WARNING|")) {
-                String warningMsg = parts[4].substring(8).replace(" ; ", "\n- ");
+                String warningMsg = parts[3].substring(8).replace(" ; ", "\n- ");
                 JOptionPane.showMessageDialog(
                     this,
                     "SERVER SECURITY AWARENESS ALERT:\n- " + warningMsg + "\n\nPlease secure your server configuration.",

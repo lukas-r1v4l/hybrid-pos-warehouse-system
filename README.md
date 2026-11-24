@@ -1,38 +1,57 @@
 # Hybrid POS & Warehouse Management System
 
-A desktop Point of Sale (POS) and warehouse inventory management application built with **Java Swing (FlatLaf)**, **Python OOP**, and **MongoDB**. Designed with a **Zero-Trust Security Architecture** and **3-Tier Role Access Control** to protect store operations, credentials, and financial records across synchronized company terminals.
+A desktop Point of Sale (POS) and warehouse inventory management system built with **Java Swing (FlatLaf)**, **Python OOP**, and **MongoDB**. Engineered with a **Zero-Trust Cybersecurity Architecture** and **Three-Tier Role Access Control**, this system protects store operations, employee credentials, terminal access, and financial records across synchronized multi-computer environments.
 
 ---
 
-## Key Features
+## Program Introduction
 
-### 1. Three-Tier Access Control & Zero-Trust Cybersecurity
+Small and medium retail businesses often face two major operational vulnerabilities when running centralized POS and inventory systems: **unauthorized terminal access** and **database-level tampering** (especially when databases are hosted on shared or third-party servers).
 
-- **Tier 1 — IT / Server Administrator (MongoDB & Network Layer):** Controls database authentication (`authorization: enabled`), network isolation, and approves new terminal IP addresses (`IT_APPROVE_IP`) before staff can connect to the central server.
-- **Tier 2 — Company Owner / Admin (`OwnerSetupFrame`):** Dedicated management portal allowing the store owner to register or replace their account (`Sign Up Owner`) with a **Manager ID Card**, or securely remove an existing owner account (`Delete Account`) via dual verification (Manager Card + Owner Password).
-- **Tier 3 — Employees / Cashiers (`LogInFrame`):** Staff can self-register (`Sign Up`) from any terminal. Their hardware `MachineGuid` and local IP address are automatically captured and queued (`PENDING_IT_APPROVAL`) until approved by the IT Administrator.
-- **Cryptographic Hashing & Session Tokens:** All passwords and Manager Cards are hashed with **PBKDF2-HMAC-SHA256** + random salts. Temporary session tokens prevent unauthorized CLI bypasses against `bridge_cli.py`.
-- **Anti-Tampering HMAC Signatures:** Seals product and transaction records with **HMAC-SHA256** (`_sig`) to detect unauthorized direct edits on untrusted or third-party servers.
-- **Server Security Awareness Alerts:** Audits database authentication and secret key configurations upon login, warning users if the server environment is insecure.
+This application solves both challenges by decoupling the user interface (**Java Swing**) from a hardened security and business-logic middleware (**Python OOP**). Every database read, write, login, and cart modification is cryptographically verified, sanitized against injection attacks, and bound to IT-approved hardware terminals.
 
-### 2. Cashier System (`CasierFrame`)
+---
 
-- **Barcode Scanning & Manual Entry:** Real-time product lookup with integrity verification and automatic stock deduction.
-- **Manager-Authorized Void (`Delete Item`):** Removing scanned items requires cryptographic verification of an Owner's Manager ID Card before restoring inventory stock.
-- **Cash Payment Validation:** Validates customer cash payments, calculates change, and records sealed receipts in MongoDB.
+## Core Functions & Features
 
-### 3. Warehouse Management (`WarehouseFrame`)
+### 1. Three-Tier Role-Based Access Control (RBAC)
 
-- **Batch Restock Queue:** Scan and queue multiple incoming items into a staging table before committing updates to MongoDB.
-- **New Product Registration:** Register new SKUs with unique barcode indexing and MongoDB JSON Schema validation.
+- **Tier 1 — IT / Server Administrator (`ITAdminFrame`):**
+  - Authenticates directly against MongoDB server admin credentials.
+  - Manages network security via the **IT Security & Server Administration Console**, allowing IT staff to approve (`AUTHORIZED`) or block (`REVOKED_BY_IT`) employee terminal IP addresses and inspect real-time `security_logs`.
+- **Tier 2 — Company Owner / Admin (`OwnerSetupFrame`):**
+  - Dedicated management portal allowing business owners to self-register (`Sign Up Owner`) with a **Manager ID Card**.
+  - Supports secure account handover/deletion (`Delete Account`) requiring dual cryptographic verification (**Manager ID Card + Owner Password**).
+- **Tier 3 — Employees / Cashiers (`LogInFrame`):**
+  - Self-service employee registration (`Sign Up`) that automatically captures the workstation's IP address and OS hardware identifier (`MachineGuid`).
+  - New terminals are placed in a `PENDING_IT_APPROVAL` queue until authorized by the IT Administrator.
+
+### 2. Zero-Trust Cybersecurity Engine (`security_core.py`)
+
+- **PBKDF2-HMAC-SHA256 Credential Hashing:** All user passwords and Manager ID Cards are salted and hashed with 100,000 iterations (zero plain-text storage).
+- **Anti-Tampering HMAC Signatures (`_sig`):** Product records and sales transactions are sealed with **HMAC-SHA256** signatures. Any unauthorized manual modification made directly in MongoDB is immediately detected and blocked (`TAMPERED`).
+- **Session Token Enforcement:** Generates temporary 48-character cryptographic session tokens upon login to prevent unauthorized command-line bypasses against `bridge_cli.py`.
+- **Brute-Force Lockout & Input Sanitization:** Automatically locks accounts after 5 consecutive failed login attempts and blocks NoSQL/regex injection payloads.
+- **Server Security Awareness Alerts:** Audits database authentication and secret key configurations upon login and warns users if the server environment is insecure.
+
+### 3. Point of Sale / Cashier Module (`CasierFrame`)
+
+- **Real-Time Barcode Scanning & Lookup:** Verifies product integrity and available stock before adding items to the customer's cart.
+- **Manager-Authorized Cart Removal (`Delete Item`):** Removing scanned items from a customer's order requires cryptographic verification of an Owner's Manager ID Card—removing the item from the shopping list without altering database stock.
+- **Atomic Checkout & Stock Deduction:** Validates cash payment amounts, calculates change, deducts inventory stock, and records HMAC-sealed receipts upon payment completion.
+
+### 4. Warehouse Inventory Module (`WarehouseFrame`)
+
+- **Batch Restock Staging:** Scan and queue multiple incoming items in a staging table before committing batch stock updates to MongoDB.
+- **New SKU Registration:** Register new products with unique barcode indexing and MongoDB JSON Schema validation.
 
 ---
 
 ## System Architecture
 
 ```text
-[Cashier / Warehouse PCs (Java Swing)]  --->  [Central Server (Python Security + MongoDB)]
-  (Auto-resolved relative paths & IP)          (PBKDF2, HMAC-SHA256, IP Whitelisting)
+[Java Swing + FlatLaf UI]  <--->  [Python OOP Security Middleware]  <--->  [Central MongoDB Server]
+ (LogIn, Owner, IT, POS)           (security_core.py & bridge_cli)          (Hashed & HMAC-Sealed)
 ```
 
 ---
@@ -44,19 +63,20 @@ hybrid-pos-warehouse-system/
 ├── AppsOn/                         # Java Swing Maven Project (NetBeans)
 │   └── src/main/java/com/apps/
 │       ├── service/
-│       │   └── PythonBridge.java   # Whitelisted CLI bridge with dynamic path & session token
+│       │   └── PythonBridge.java   # Whitelisted CLI bridge with relative path & session tokens
 │       └── view/
-│           ├── LogInFrame.java     # Employee Log In, Sign Up & Owner Portal launcher
-│           ├── OwnerSetupFrame.java# Dedicated Owner Sign Up & Dual-Verified Account Deletion
-│           ├── DashboardFrame.java # Main module navigation screen
+│           ├── LogInFrame.java     # Main authentication portal (Employee, Owner, IT launcher)
+│           ├── OwnerSetupFrame.java# Owner Sign Up & dual-verified account deletion portal
+│           ├── ITAdminFrame.java   # IT Security Console (IP approvals & audit log viewer)
+│           ├── DashboardFrame.java # Module selection screen
 │           ├── CasierFrame.java    # POS cashier interface
 │           └── WarehouseFrame.java # Inventory restock & new product interface
 ├── python_engine/                  # Python OOP Backend & Security Engine
-│   ├── db_config.py                # MongoDB connection, regex sanitization & schema validation
+│   ├── db_config.py                # MongoDB connection, input sanitization & JSON schema rules
 │   ├── security_core.py            # 3-tier auth, IP tracking, PBKDF2 hashing & HMAC sealing
-│   ├── casier_system.py            # Secured cashier & transaction operations
+│   ├── casier_system.py            # Secured cashier & manager verification operations
 │   ├── input_stock.py              # Warehouse inventory operations
-│   ├── bridge_cli.py               # Token-protected CLI entry point
+│   ├── bridge_cli.py               # Token-protected CLI router
 │   └── .env.example                # Environment configuration template
 ├── requirements.txt                # Python dependencies
 └── README.md
@@ -64,62 +84,58 @@ hybrid-pos-warehouse-system/
 
 ---
 
-## Deployment & Device Setup Guide (For New Computers / Company Servers)
+## Installation & Deployment Guide
 
-Because this project uses **relative directory resolution** (`../python_engine/bridge_cli.py`) and system PATH execution (`python`), you do **not** need to replicate the original developer's folder paths. Follow these steps to deploy on any new device or company network:
+Because `PythonBridge.java` uses **relative path resolution** (`../python_engine/bridge_cli.py`) and system PATH execution (`python`), you can deploy this application on any Windows/Linux machine without modifying hardcoded file paths.
 
 ### Prerequisites
 
-- **Java JDK 17+** & **Apache NetBeans** (or Maven)
-- **Python 3.10+** (Ensure **"Add Python to PATH"** is checked during installation)
+- **Java JDK 17+** and **Apache NetBeans** (or Maven)
+- **Python 3.10+** (Ensure **"Add Python to PATH"** is enabled during installation)
 - **MongoDB Community Server** (Installed on the central server PC or cloud host)
 
 ### Step 1: Clone & Install Dependencies
 
-1. Clone the repository to any directory on the target computer:
-   ```bash
-   git clone https://github.com
-   cd hybrid-pos-warehouse-system
-   ```
-2. Install the required Python libraries:
-   ```bash
-   cd python_engine
-   pip install -r ../requirements.txt
-   ```
+```bash
+git clone https://github.com
+cd hybrid-pos-warehouse-system/python_engine
+pip install -r ../requirements.txt
+```
 
 ### Step 2: Configure Environment Variables (`.env`)
 
-1. Copy the template file to create your local `.env`:
+1. Copy `.env.example` to `.env` inside `python_engine/`:
    ```bash
    cp .env.example .env
    ```
-2. Open `python_engine/.env` and configure your server connection:
+2. Edit `python_engine/.env` with your MongoDB server credentials and secret key:
 
    ```env
-   # For single-PC / local testing:
-   MONGO_URL=mongodb://adminUser:YourPassword@127.0.0.1:27017/?authSource=admin
+   # Single-PC local deployment:
+   MONGO_URL=mongodb://adminUser:YourStrongPassword@127.0.0.1:27017/?authSource=admin
 
-   # For multi-PC company network (replace with your Central Server's LAN IP):
-   # MONGO_URL=mongodb://adminUser:YourPassword@192.168.1.10:27017/?authSource=admin
+   # Multi-PC company network deployment (use Central Server LAN IP):
+   # MONGO_URL=mongodb://adminUser:YourStrongPassword@192.168.1.10:27017/?authSource=admin
 
    DB_NAME=toko_stock_db
-   SERVER_SECRET_KEY=replace_with_a_random_secret_string_at_least_32_chars
+   SERVER_SECRET_KEY=replace_with_a_random_secret_key_minimum_32_characters
    ```
 
-   _(Note: Ensure all company terminals share the exact same `SERVER_SECRET_KEY` so HMAC data seals remain valid across devices)._
+### Step 3: Initialize Accounts & Approve Terminals
 
-### Step 3: Verify Python Path (Optional)
+1. Open the `AppsOn` project in **Apache NetBeans** and run `LogInFrame.java` (`Shift + F6`).
+2. **Create Company Owner (Tier 2):** Click **Owner Account Management** -> **Sign Up Owner** to register the Owner account and Manager ID Card.
+3. **Register Employee Terminals (Tier 3):** On each cashier/warehouse PC, click **Sign Up** on `LogInFrame` to register an employee account and submit the PC's IP address for approval.
+4. **Approve Terminal IPs (Tier 1):** Click **IT Server & Security Console**, log in using your MongoDB Admin credentials, select the pending terminal row, and click **Approve Selected IP**.
 
-- By default, `PythonBridge.java` uses `PYTHON_EXE = "python"`.
-- If your IDE does not recognize the global `python` command, run `where python` (Windows) or `which python3` (Linux/macOS) in your terminal and paste that path into `PYTHON_EXE` inside `AppsOn/src/main/java/com/apps/service/PythonBridge.java`.
+---
 
-### Step 4: Initialize Accounts & Approve Terminal IPs
+## Important Security Warnings for Users
 
-1. **Run the Application:** Open `AppsOn` in Apache NetBeans and run `LogInFrame.java` (`Shift + F6`).
-2. **Register Company Owner (Tier 2):** Click **Owner Account Management** -> **Sign Up Owner** to create the Owner credentials and Manager ID Card (automatically authorizes the Owner's PC).
-3. **Register Employees (Tier 3):** Staff click **Sign Up** on `LogInFrame` from their respective cashier/warehouse computers. New terminal IPs are placed in `PENDING_IT_APPROVAL`.
-4. **IT Administrator IP Approval (Tier 1):** On the central server terminal, run the following command to authorize a new employee terminal IP:
-   ```bash
-   cd python_engine
-   python bridge_cli.py IT_APPROVE_IP <EMPLOYEE_IP_ADDRESS>
-   ```
+> **CRITICAL — READ BEFORE DEPLOYING IN PRODUCTION:**
+>
+> 1. **Protect Your `.env` File & `SERVER_SECRET_KEY`:** Never commit your `.env` file to public repositories. All company terminals connected to the same server **must share the exact same `SERVER_SECRET_KEY`**. Changing or losing this key will cause existing HMAC product seals (`_sig`) to fail integrity verification.
+> 2. **Enable MongoDB Authentication (`authorization: enabled`):** Never run the central MongoDB server without username/password authentication enabled in `mongod.cfg`. If hosted over the internet or an untrusted network, enforce **TLS/SSL encryption**.
+> 3. **Keep Manager ID Cards Confidential:** The Owner's Manager ID Card authorizes item removals and account deletions. Do not share this code with unauthorized staff.
+> 4. **Monitor `security_logs` Regularly:** IT Administrators should periodically review the **Security Audit Logs** tab in `ITAdminFrame` for `DATA_TAMPERING_DETECTED`, `TOKEN_BYPASS_ATTEMPT`, or repeated `FAILED_LOGIN` events.
+> 5. **Do Not Edit Database Values Manually:** Editing product prices or stock quantities directly inside MongoDB Compass will invalidate the cryptographic `_sig` seal and automatically lock the item from being sold at the cashier.
