@@ -9,32 +9,32 @@ import java.util.Set;
 
 public class PythonBridge {
 
-    private static final String PYTHON_EXE = "C:\\Users\\Lukas Rivaldo\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe";
-    private static final String SCRIPT_PATH = "E:\\Code\\PROJECT\\Mesin Manajemen & Kasir\\python_engine\\bridge_cli.py";
-    
-    // Token sesi aktif disimpan di memori RAM setelah login berhasil
+    private static final String PYTHON_EXE = "python";
+    private static final File SCRIPT_FILE = new File("../python_engine/bridge_cli.py").getAbsoluteFile();
+
     public static String SESSION_TOKEN = "";
 
-    private static final Set<String> PUBLIC_ACTIONS = Set.of("CHECK_SETUP", "SETUP_OWNER", "LOGIN");
+    private static final Set<String> PUBLIC_ACTIONS = Set.of(
+        "SIGNUP_EMPLOYEE", "SIGNUP_OWNER", "DELETE_OWNER", "IT_APPROVE_IP", "LOGIN"
+    );
     private static final Set<String> ALLOWED_ACTIONS = Set.of(
-        "CHECK_SETUP", "SETUP_OWNER", "LOGIN",
-        "CHECK", "RESTOCK", "NEW_PRODUCT", "DELETE_STOCK", "DELETE_ITEM", "TRANSACTION"
+        "SIGNUP_EMPLOYEE", "SIGNUP_OWNER", "DELETE_OWNER", "IT_APPROVE_IP", "LOGIN",
+        "CHECK", "RESTOCK", "NEW_PRODUCT", "DELETE_STOCK", "DELETE_ITEM", "VERIFY_MANAGER", "TRANSACTION"
     );
 
     public static String runCommand(String... args) {
         if (args == null || args.length == 0 || !ALLOWED_ACTIONS.contains(args[0])) {
-            return "SECURITY_ERROR|Perintah tidak diizinkan!";
+            return "SECURITY_ERROR|Action is not permitted!";
         }
 
         StringBuilder output = new StringBuilder();
         try {
             List<String> command = new ArrayList<>();
             command.add(PYTHON_EXE);
-            command.add(SCRIPT_PATH);
-            command.add(args[0]); // Nama aksi
+            command.add(SCRIPT_FILE.getAbsolutePath());
+            command.add(args[0]);
 
             if (!PUBLIC_ACTIONS.contains(args[0])) {
-
                 command.add(SESSION_TOKEN);
             }
 
@@ -42,8 +42,8 @@ public class PythonBridge {
                 command.add(args[i]);
             }
 
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.directory(new File("E:\\Code\\PROJECT\\Mesin Manajemen & Kasir\\python_engine"));
+ProcessBuilder pb = new ProcessBuilder(command);
+            pb.directory(SCRIPT_FILE.getParentFile());
             pb.redirectErrorStream(true);
             Process process = pb.start();
 

@@ -1,18 +1,41 @@
 import os
 import hmac
 import uuid
+import socket
 import hashlib
 import secrets
-import winreg
 import platform
 from datetime import datetime
 from db_config import DatabaseManager
+
 
 class SecurityManager(DatabaseManager):
     def __init__(self):
         super().__init__()
         self.__server_secret = os.getenv("SERVER_SECRET_KEY", "").encode("utf-8")
-    
+
+    @staticmethod
+    def get_current_ip():
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except Exception:
+            return "127.0.0.1"
+
+    @staticmethod
+    def get_current_device_id():
+        try:
+            import winreg
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Cryptography"
+            ) as key:
+                guid, _ = winreg.QueryValueEx(key, "MachineGuid")
+                return str(guid)
+        except Exception:
+            return f"{platform.node()}-{hex(uuid.getnode())}"
+
     @staticmethod
     def hash_credential(plain_text, salt=None):
         if salt is None:
@@ -35,108 +58,138 @@ class SecurityManager(DatabaseManager):
             stored_hash
         )
 
-    def setup_complete(self):
-        return self.users.count_documents({}) > 0
-
-    def create_initial_owner(self, username, password, manager_card):
-        if self.setup_complete():
-            raise ValueError("The system already has an Owner! Initial registration is locked.")
+    def owner_signup(self, username, password, manager_card):
         clean_user = self.sanitize_input(username, r"^[A-Za-z0-9_]{3,20}$")
         if len(password) < 8 or len(manager_card) < 4:
-            raise ValueError("Password must be at least 8 characters long, and Card Manager must be at least 4 characters long!")
-        
+            raise ValueError("Password must be at least 8 characters and Manager Card at least 4 characters!")
+
+        if self.users.find_one({"username": clean_user}):
+            raise ValueError(f"Username '{clean_user}' is already taken!")
+        ip_addr = self.get_current_ip()
         device_id = self.get_current_device_id()
         self.users.insert_one({
             "username": clean_user,
             "password_hash": self.hash_credential(password),
             "manager_card_hash": self.hash_credential(manager_card),
             "role": "OWNER",
+            "registered_ip": ip_addr,
+            "device_id": device_id,
             "created_at": datetime.now()
         })
-        self.authorized_devices.insert_one({
-            "device_id": device_id,
-            "device_name": os.environ.get("COMPUTERNAME", "PRIMARY-TERMINAL"),
-            "status": "AUTHORIZED",
-            "registered_at": datetime.now()
-        })
-        self.log_event("SYSTEM_INITIALIZED", f"Owner '{clean_user}' registered the system from device '{device_id}'.")
+        self.authorized_devices.update_one(
+            {"device_id": device_id},
+            {"$set": {
+                "ip_address": ip_addr,
+                "device_name": os.environ.get("COMPUTERNAME", "OWNER-PC"),
+                "status": "AUTHORIZED",
+                "approved_by": "OWNER_SELF_REGISTER",
+                "updated_at": datetime.now()
+            }},
+            upsert=True
+        )
+        self.log_event("OWNER_REGISTERED", f"New Owner '{clean_user}' registered from IP {ip_addr}.")
         return True
+
+    def owner_delete(self, username, manager_card, password):
+        clean_user = self.sanitize_input(username, r"^[A-Za-z0-9_]{3,20}$")
+        owner = self.users.find_one({"username": clean_user, "role": "OWNER"})
+        if not owner:
+            raise ValueError("Owner account not found!")
+        valid_card = self.verify_credential(manager_card, owner["manager_card_hash"])
+        valid_pass = self.verify_credential(password, owner["password_hash"])
+        if not (valid_card and valid_pass):
+            self.log_event(
+                "UNAUTHORIZED_OWNER_DELETE",
+                f"Failed deletion verification for Owner '{clean_user}' from IP {self.get_current_ip()}!"
+            )
+            return False
+        self.users.delete_one({"_id": owner["_id"]})
+        self.log_event("OWNER_DELETED", f"Owner account '{clean_user}' has been deleted after valid verification.")
+        return True
+
+    def employee_signup(self, username, password):
+        clean_user = self.sanitize_input(username, r"^[A-Za-z0-9_]{3,20}$")
+        if len(password) < 6:
+            raise ValueError("Employee password must be at least 6 characters long!")
+        if self.users.find_one({"username": clean_user}):
+            raise ValueError(f"Username '{clean_user}' is already registered! Please Log In.")
+        ip_addr = self.get_current_ip()
+        device_id = self.get_current_device_id()
+        self.users.insert_one({
+            "username": clean_user,
+            "password_hash": self.hash_credential(password),
+            "role": "EMPLOYEE",
+            "registered_ip": ip_addr,
+            "device_id": device_id,
+            "created_at": datetime.now()
+        })
+        existing_dev = self.authorized_devices.find_one({"device_id": device_id, "ip_address": ip_addr})
+        if existing_dev and existing_dev.get("status") == "AUTHORIZED":
+            self.log_event("EMPLOYEE_REGISTERED", f"Employee '{clean_user}' registered on authorized IP ({ip_addr}).")
+            return "OK_AUTHORIZED"
+        else:
+            self.authorized_devices.update_one(
+                {"device_id": device_id},
+                {"$set": {
+                    "ip_address": ip_addr,
+                    "device_name": os.environ.get("COMPUTERNAME", "EMPLOYEE-PC"),
+                    "requested_by": clean_user,
+                    "status": "PENDING_IT_APPROVAL",
+                    "requested_at": datetime.now()
+                }},
+                upsert=True
+            )
+            self.log_event(
+                "PENDING_IP_APPROVAL",
+                f"Employee '{clean_user}' signed up from new IP ({ip_addr}). Awaiting IT approval."
+            )
+            return f"PENDING_IT|{ip_addr}"
 
     def authentication_user(self, username, password):
         clean_user = self.sanitize_input(username, r"^[A-Za-z0-9_]{3,20}$")
+        ip_addr = self.get_current_ip()
         device_id = self.get_current_device_id()
-        device = self.authorized_devices.find_one({"device_id": device_id, "status": "AUTHORIZED"})
-        if not device:
-            self.log_event("UNAUTHORIZED_DEVICE", f"Foreign device ({device_id}) tried to log in as '{clean_user}'!")
-            return "DEVICE_BLOCKED"
-
         user_doc = self.users.find_one({"username": clean_user})
         if not user_doc:
-            self.log_event("FAILED_LOGIN", f"Login attempt with an unknown username: '{clean_user}' from {device_id}")
-            return "INVALID"
+            self.log_event(
+                "UNREGISTERED_LOGIN",
+                f"Unregistered username '{clean_user}' attempted login from IP {ip_addr}."
+            )
+            return "NOT_REGISTERED"
+        device = self.authorized_devices.find_one({"device_id": device_id, "ip_address": ip_addr})
+        if not device or device.get("status") != "AUTHORIZED":
+            self.log_event(
+                "IP_NOT_APPROVED",
+                f"Access denied for '{clean_user}': IP {ip_addr} is not approved by IT!"
+            )
+            return f"IP_NOT_APPROVED|{ip_addr}"
         if user_doc.get("failed_attempts", 0) >= 5:
             return "LOCKED"
         if self.verify_credential(password, user_doc["password_hash"]):
             self.users.update_one({"username": clean_user}, {"$set": {"failed_attempts": 0}})
-            return "OK"
+            return f"OK|{user_doc.get('role', 'EMPLOYEE')}"
         else:
             attempts = user_doc.get("failed_attempts", 0) + 1
             self.users.update_one({"username": clean_user}, {"$set": {"failed_attempts": attempts}})
-            self.log_event("FAILED_LOGIN", f"Incorrect password (attempt {attempts}) for '{clean_user}' from {device_id}")
-            return "LOCKED" if attempts >= 5 else "INVALID"
+            self.log_event(
+                "FAILED_LOGIN",
+                f"Wrong password attempt #{attempts} for '{clean_user}' from IP {ip_addr}."
+            )
+            return "LOCKED" if attempts >= 5 else "WRONG_PASSWORD"
 
-    def generate_signature(self, payload_string):
-        if not self.__server_secret:
-            return "UNSEALED"
-        return hmac.new(
-            self.__server_secret,
-            payload_string.encode("utf-8"),
-            hashlib.sha256
-        ).hexdigest()
-
-    def verify_product_integrity(self, product_doc):
-        if not self.__server_secret or "_sig" not in product_doc:
-            return True
-        payload = f"{product_doc['barcode']}|{product_doc['product_name']}|{product_doc['price']}|{product_doc['stock']}"
-        expected_sig = self.generate_signature(payload)
-        is_valid = hmac.compare_digest(expected_sig, product_doc["_sig"])
-        if not is_valid:
-            self.log_event("DATA_TAMPERING_DETECTED", f"CRITICAL WARNING: Product data for {product_doc['barcode']} has been illegally modified outside of the application!")
-        return is_valid
-
-    def audit_server_security(self):
-        warnings = []
-        mongo_url = os.getenv("MONGO_URL", "")
-        if "@" not in mongo_url:
-            warnings.append("The database server does not use username and password authentication.")
-        if "localhost" not in mongo_url and "127.0.0.1" not in mongo_url and "tls=true" not in mongo_url.lower() and "mongodb+srv" not in mongo_url.lower():
-            warnings.append("The connection to the remote server is unencrypted (TLS/SSL is disabled).")
-        if not self.__server_secret:
-            warnings.append("SERVER_SECRET_KEY has not been set in .env (data anti-tampering seal is disabled).")
-        recent_alerts = self.security_logs.count_documents({
-            "event": {"$in": ["DATA_TAMPERING_DETECTED", "UNAUTHORIZED_DEVICE", "UNAUTHORIZED_DELETE_ATTEMPT"]}
-        })
-        if recent_alerts > 0:
-            warnings.append(f"DETECTED! {recent_alerts} suspicious activities in the server security logs!")
-        return "SAFE" if not warnings else "WARNING|" + " ; ".join(warnings)
-
-    @staticmethod
-    def get_current_device_id():
-        try:
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography")
-            guid, _ = winreg.QueryValueEx(key, "MachineGuid")
-            winreg.CloseKey(key)
-            return str(guid)
-        except Exception:
-            return f"{platform.node()}-{hex(uuid.getnode())}"
-
-    def log_event(self, event_type, detail):
-        self.security_logs.insert_one({
-            "timestamp": datetime.now(),
-            "event": event_type,
-            "device_id": self.get_current_device_id(),
-            "detail": detail
-        })
+    def it_approve_ip(self, target_ip):
+        result = self.authorized_devices.update_many(
+            {"ip_address": target_ip},
+            {"$set": {
+                "status": "AUTHORIZED",
+                "approved_by": "IT_ADMIN",
+                "approved_at": datetime.now()
+            }}
+        )
+        if result.matched_count == 0:
+            raise ValueError(f"IP Address '{target_ip}' not found in the device queue!")
+        self.log_event("IT_IP_APPROVED", f"IT Administrator approved server access for IP {target_ip}.")
+        return True
 
     def create_session_token(self, username):
         token = secrets.token_hex(24)
@@ -154,3 +207,45 @@ class SecurityManager(DatabaseManager):
             "token_device": self.get_current_device_id()
         })
         return user is not None
+
+    def generate_signature(self, payload_string):
+        if not self.__server_secret:
+            return "UNSEALED"
+        return hmac.new(self.__server_secret, payload_string.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def verify_product_integrity(self, product_doc):
+        if not self.__server_secret:
+            return True
+        if "_sig" not in product_doc:
+            self.log_event(
+                "DATA_TAMPERING_DETECTED",
+                f"CRITICAL: Signature missing for product {product_doc.get('barcode', 'UNKNOWN')}!"
+            )
+            return False
+
+        payload = f"{product_doc['barcode']}|{product_doc['product_name']}|{product_doc['price']}|{product_doc['stock']}"
+        is_valid = hmac.compare_digest(self.generate_signature(payload), product_doc["_sig"])
+        if not is_valid:
+            self.log_event(
+                "DATA_TAMPERING_DETECTED",
+                f"CRITICAL: Product {product_doc['barcode']} was illegally modified outside the application!"
+            )
+        return is_valid
+
+    def audit_server_security(self):
+        warnings = []
+        mongo_url = os.getenv("MONGO_URL", "")
+        if "@" not in mongo_url:
+            warnings.append("Database server is not using Username & Password authentication.")
+        if not self.__server_secret:
+            warnings.append("SERVER_SECRET_KEY is not configured in .env.")
+        return "SAFE" if not warnings else "WARNING|" + " ; ".join(warnings)
+
+    def log_event(self, event_type, detail):
+        self.security_logs.insert_one({
+            "timestamp": datetime.now(),
+            "event": event_type,
+            "ip_address": self.get_current_ip(),
+            "device_id": self.get_current_device_id(),
+            "detail": detail
+        })

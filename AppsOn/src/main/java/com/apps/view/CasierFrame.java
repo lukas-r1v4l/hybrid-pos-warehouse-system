@@ -7,6 +7,7 @@ package com.apps.view;
 public class CasierFrame extends javax.swing.JFrame {
     private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(CasierFrame.class.getName());
         public CasierFrame() {
+        setTitle("Casier Frame");
         initComponents();
         txtBarcode.setText("");
         txtBarcode.putClientProperty("JTextField.placeholderText", "Scan Barcode / Input Manual Code...");
@@ -87,7 +88,7 @@ public class CasierFrame extends javax.swing.JFrame {
         pack();
     }// </editor-fold>//GEN-END:initComponents
     private int total = 0;
-    private void scanorSearchProduct() {
+        private void scanorSearchProduct() {
         String kode = txtBarcode.getText().trim();
         if (kode.isEmpty()) return;
         String respon = com.apps.service.PythonBridge.runCommand("CHECK", kode);
@@ -96,34 +97,42 @@ public class CasierFrame extends javax.swing.JFrame {
             String nama = data[1];
             int harga = Integer.parseInt(data[2]);
             int stok = Integer.parseInt(data[3]);
+
+            javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) tblBelanja.getModel();
+            int existingRow = -1;
+            int qtyInCart = 0;
+            for (int i = 0; i < model.getRowCount(); i++) {
+                if (model.getValueAt(i, 0).toString().equals(kode)) {
+                    existingRow = i;
+                    qtyInCart = Integer.parseInt(model.getValueAt(i, 3).toString());
+                    break;
+                }
+            }
+
             String inputQty = javax.swing.JOptionPane.showInputDialog(
                 this,
-                "Product: " + nama + "\nPrice: Rp " + harga + "\nStock: " + stok + "\n\nWhat is the quantity purchased??",
+                "Product: " + nama + "\nPrice: Rp " + harga + "\nAvailable Stock: " + stok + " (In Cart: " + qtyInCart + ")\n\nEnter purchase quantity:",
                 "Quantity Input",
                 javax.swing.JOptionPane.QUESTION_MESSAGE
             );
+
             if (inputQty != null && !inputQty.trim().isEmpty()) {
-                int qty = Integer.parseInt(inputQty.trim());
-                if (qty > 0 && qty <= stok) {
-                    com.apps.service.PythonBridge.runCommand("DELETE_STOCK", kode, String.valueOf(qty));
-                    javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) tblBelanja.getModel();
-                    boolean ditemukan = false;
-                    for (int i = 0; i < model.getRowCount(); i++) {
-                        if (model.getValueAt(i, 0).toString().equals(kode)) {
-                            int qtyLama = Integer.parseInt(model.getValueAt(i, 3).toString());
-                            int qtyBaru = qtyLama + qty;
-                            model.setValueAt(qtyBaru, i, 3);
-                            model.setValueAt(qtyBaru * harga, i, 4);
-                            ditemukan = true;
-                            break;
+                try {
+                    int qty = Integer.parseInt(inputQty.trim());
+                    if (qty > 0 && (qtyInCart + qty) <= stok) {
+                        if (existingRow != -1) {
+                            int newQty = qtyInCart + qty;
+                            model.setValueAt(newQty, existingRow, 3);
+                            model.setValueAt(newQty * harga, existingRow, 4);
+                        } else {
+                            model.addRow(new Object[]{kode, nama, harga, qty, harga * qty});
                         }
+                        subTotal();
+                    } else {
+                        javax.swing.JOptionPane.showMessageDialog(this, "Invalid quantity or exceeds available stock!");
                     }
-                    if (!ditemukan) {
-                        model.addRow(new Object[]{kode, nama, harga, qty, harga * qty});
-                    }
-                    subTotal();
-                } else {
-                    javax.swing.JOptionPane.showMessageDialog(this, "Quantity is invalid or exceeds stock!");
+                } catch (NumberFormatException ex) {
+                    javax.swing.JOptionPane.showMessageDialog(this, "Quantity must be a valid number!");
                 }
             }
         } else if (respon.equals("NOT_FOUND")) {
@@ -150,23 +159,26 @@ public class CasierFrame extends javax.swing.JFrame {
             javax.swing.JOptionPane.showMessageDialog(this, "The shopping list is still empty!");
             return;
         }
-        javax.swing.JDialog dialogDelete = new javax.swing.JDialog(this, "Delete Item - Verification Manager", true);
+        javax.swing.JDialog dialogDelete = new javax.swing.JDialog(this, "Remove Item - Manager Verification", true);
         dialogDelete.setSize(380, 230);
         dialogDelete.setLocationRelativeTo(this);
         dialogDelete.setLayout(new java.awt.GridLayout(5, 1, 8, 8));
         ((javax.swing.JPanel) dialogDelete.getContentPane()).setBorder(javax.swing.BorderFactory.createEmptyBorder(15, 20, 15, 20));
+
         javax.swing.JPasswordField txtCard = new javax.swing.JPasswordField();
-        txtCard.putClientProperty("JTextField.placeholderText", "Scan Card Manager...");
+        txtCard.putClientProperty("JTextField.placeholderText", "Scan Manager ID Card...");
         javax.swing.JTextField txtDelBarcode = new javax.swing.JTextField();
-        txtDelBarcode.putClientProperty("JTextField.placeholderText", "Scan Barcode Product...");
-        javax.swing.JButton btnConfirmDel = new javax.swing.JButton("Delete Item");
+        txtDelBarcode.putClientProperty("JTextField.placeholderText", "Scan Product Barcode to Remove...");
+        javax.swing.JButton btnConfirmDel = new javax.swing.JButton("Remove from List");
         btnConfirmDel.setBackground(new java.awt.Color(220, 38, 38));
         btnConfirmDel.setForeground(java.awt.Color.WHITE);
-        dialogDelete.add(new javax.swing.JLabel("Card Manager:"));
+
+        dialogDelete.add(new javax.swing.JLabel("Manager ID Card:"));
         dialogDelete.add(txtCard);
-        dialogDelete.add(new javax.swing.JLabel("Deleted Product Barcode:"));
+        dialogDelete.add(new javax.swing.JLabel("Product Barcode:"));
         dialogDelete.add(txtDelBarcode);
         dialogDelete.add(btnConfirmDel);
+
         btnConfirmDel.addActionListener(e -> {
             String card = new String(txtCard.getPassword()).trim();
             String delBarcode = txtDelBarcode.getText().trim();
@@ -178,19 +190,25 @@ public class CasierFrame extends javax.swing.JFrame {
                 }
             }
             if (targetRow == -1) {
-                javax.swing.JOptionPane.showMessageDialog(dialogDelete, "That barcode is not on the shopping list.!");
+                javax.swing.JOptionPane.showMessageDialog(dialogDelete, "That barcode is not in the customer's shopping list!");
                 return;
             }
             String qty = model.getValueAt(targetRow, 3).toString();
-            String hasil = com.apps.service.PythonBridge.runCommand("DELETE_ITEM", card, delBarcode, qty);
+            // Verify Manager Card only; database stock remains untouched
+                        String hasil = com.apps.service.PythonBridge.runCommand("VERIFY_MANAGER", card, delBarcode, qty);
             if (hasil.equals("OK")) {
                 model.removeRow(targetRow);
                 subTotal();
-                javax.swing.JOptionPane.showMessageDialog(dialogDelete, "Item successfully removed & stock returned!");
+                javax.swing.JOptionPane.showMessageDialog(dialogDelete, "Item removed from shopping list (Database stock unchanged).");
                 dialogDelete.dispose();
                 txtBarcode.requestFocus();
             } else {
-                javax.swing.JOptionPane.showMessageDialog(dialogDelete, "Card Manager error! Access denied.", "Unauthorized", javax.swing.JOptionPane.ERROR_MESSAGE);
+                javax.swing.JOptionPane.showMessageDialog(
+                    dialogDelete,
+                    "Verification Failed!\nActual Python Response:\n[" + hasil + "]",
+                    "Unauthorized / Error",
+                    javax.swing.JOptionPane.ERROR_MESSAGE
+                );
                 txtCard.setText("");
                 txtCard.requestFocus();
             }
@@ -229,7 +247,7 @@ public class CasierFrame extends javax.swing.JFrame {
                     int kurang = total - uangBayar;
                     javax.swing.JOptionPane.showMessageDialog(
                         dialogBuy,
-                        "Transaction Declined! Insufficient funds Rp " + kurang + ".\nPlease insert the exact amount or more..",
+                        "Transaction Declined! Insufficient funds Rp " + kurang + ".\nPlease insert the exact amount or more.",
                         "Insufficient Funds",
                         javax.swing.JOptionPane.ERROR_MESSAGE
                     );
@@ -239,11 +257,21 @@ public class CasierFrame extends javax.swing.JFrame {
                 int kembalian = uangBayar - total;
                 StringBuilder itemsJson = new StringBuilder("[");
                 for (int i = 0; i < model.getRowCount(); i++) {
+                    String itemBarcode = model.getValueAt(i, 0).toString();
+                    String itemQty = model.getValueAt(i, 3).toString();
+
+                    // Deduct stock in MongoDB only after payment is confirmed
+                    String stockRes = com.apps.service.PythonBridge.runCommand("DELETE_STOCK", itemBarcode, itemQty);
+                    if (!stockRes.equals("OK")) {
+                        javax.swing.JOptionPane.showMessageDialog(dialogBuy, "Stock update failed for " + itemBarcode + ": " + stockRes, "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
+                        return;
+                    }
+
                     if (i > 0) itemsJson.append(",");
                     itemsJson.append(String.format(
                         "{\"barcode\":\"%s\",\"product_name\":\"%s\",\"price\":%s,\"qty\":%s,\"subtotal\":%s}",
-                        model.getValueAt(i, 0), model.getValueAt(i, 1),
-                        model.getValueAt(i, 2), model.getValueAt(i, 3), model.getValueAt(i, 4)
+                        itemBarcode, model.getValueAt(i, 1),
+                        model.getValueAt(i, 2), itemQty, model.getValueAt(i, 4)
                     ));
                 }
                 itemsJson.append("]");

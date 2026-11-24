@@ -11,44 +11,58 @@ def main():
 
     action = sys.argv[1]
     sec = SecurityManager()
+
     try:
-        if action == "CHECK_SETUP":
-            print("READY" if sec.setup_complete() else "NEED_SETUP")
+        if action == "SIGNUP_EMPLOYEE":
+            res = sec.employee_signup(sys.argv[2], sys.argv[3])
+            print(res)
             return
-        elif action == "SETUP_OWNER":
-            sec.create_initial_owner(sys.argv[2], sys.argv[3], sys.argv[4])
+        elif action == "SIGNUP_OWNER":
+            sec.owner_signup(sys.argv[2], sys.argv[3], sys.argv[4])
+            print("OK")
+            return
+        elif action == "DELETE_OWNER":
+            if sec.owner_delete(sys.argv[2], sys.argv[3], sys.argv[4]):
+                print("OK")
+            else:
+                print("INVALID_VERIFICATION")
+            return
+        elif action == "IT_APPROVE_IP":
+            sec.it_approve_ip(sys.argv[2])
             print("OK")
             return
         elif action == "LOGIN":
-            status = sec.authentication_user(sys.argv[2], sys.argv[3])
-            if status == "OK":
+            auth_res = sec.authentication_user(sys.argv[2], sys.argv[3])
+            if auth_res.startswith("OK|"):
+                role = auth_res.split("|")[1]
                 token = sec.create_session_token(sys.argv[2])
                 audit = sec.audit_server_security()
-                print(f"OK|{token}|{audit}")
+                print(f"OK|{role}|{token}|{audit}")
             else:
-                print(status)
+                print(auth_res)
             return
-        if len(sys.argv) < 3:
-            print("UNAUTHORIZED_SESSION")
-            return
-
-        token = sys.argv[2]
-        if not sec.verify_session_token(token):
-            sec.log_event("TOKEN_BYPASS_ATTEMPT", f"Illegal access to action '{action}' without a valid session token!")
+        if len(sys.argv) < 3 or not sec.verify_session_token(sys.argv[2]):
+            sec.log_event("TOKEN_BYPASS_ATTEMPT", f"Unauthorized CLI access to '{action}' without a valid session token!")
             print("UNAUTHORIZED_SESSION")
             return
 
         warehouse = WarehouseManager()
         casier = CasierManager()
+
         if action == "CHECK":
-            produk = casier.product_search(sys.argv[3])
-            if produk:
-                if not sec.verify_product_integrity(produk):
-                    print("TAMPERED| This product data has been detected as having been illegally modified in the database!")
+            product = casier.product_search(sys.argv[3])
+            if product:
+                if not sec.verify_product_integrity(product):
+                    print("TAMPERED|Product integrity verification failed! Possible unauthorized database modification.")
                 else:
-                    print(f"OK|{produk['product_name']}|{produk['price']}|{produk['stock']}")
+                    print(f"OK|{product['product_name']}|{product['price']}|{product['stock']}")
             else:
                 print("NOT_FOUND")
+        elif action == "VERIFY_MANAGER":
+            if casier.verify_manager_only(sys.argv[3], sys.argv[4], int(sys.argv[5])):
+                print("OK")
+            else:
+                print("UNAUTHORIZED")
         elif action == "RESTOCK":
             warehouse.restock(sys.argv[3], int(sys.argv[4]))
             print("OK")

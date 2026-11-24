@@ -4,42 +4,64 @@ from security_core import SecurityManager
 class CasierManager(SecurityManager):
     def remove_stock(self, barcode, qty):
         clean_barcode = self.sanitize_input(barcode, r"^[A-Za-z0-9\-]{1,30}$")
-        produk = self.product.find_one({"barcode": clean_barcode})
-        if not produk or not self.verify_product_integrity(produk):
-            raise ValueError("SECURITY ALERT: Product data integrity failed verification!")
+        product = self.product.find_one({"barcode": clean_barcode})
+        if not product or not self.verify_product_integrity(product):
+            raise ValueError("SECURITY ALERT: Product integrity verification failed!")
 
-        stok_baru = int(produk["stock"]) - int(qty)
-        payload = f"{clean_barcode}|{produk['product_name']}|{produk['price']}|{stok_baru}"
+        qty_int = int(qty)
+        if qty_int <= 0 or int(product["stock"]) < qty_int:
+            raise ValueError("Insufficient stock or invalid quantity!")
+
+        new_stock = int(product["stock"]) - qty_int
+        payload = f"{clean_barcode}|{product['product_name']}|{product['price']}|{new_stock}"
         self.product.update_one(
             {"barcode": clean_barcode},
-            {"$set": {"stock": stok_baru, "_sig": self.generate_signature(payload)}}
+            {"$set": {"stock": new_stock, "_sig": self.generate_signature(payload)}}
         )
 
     def verification_delete(self, card, barcode, qty):
         clean_barcode = self.sanitize_input(barcode, r"^[A-Za-z0-9\-]{1,30}$")
-        owner = self.users.find_one({"role": "OWNER"})
-        if not owner or not self.verify_credential(card, owner["manager_card_hash"]):
-            self.log_event("UNAUTHORIZED_DELETE_ATTEMPT", f"Attempt to delete {clean_barcode} using Card Manager is invalid!")
+        owners = list(self.users.find({"role": "OWNER"}))
+        is_authorized = any(self.verify_credential(card, o.get("manager_card_hash", "")) for o in owners)
+
+        if not is_authorized:
+            self.log_event(
+                "UNAUTHORIZED_DELETE_ATTEMPT",
+                f"Unauthorized void attempt on barcode '{clean_barcode}' from IP {self.get_current_ip()}!"
+            )
             return False
 
-        produk = self.product.find_one({"barcode": clean_barcode})
-        stok_baru = int(produk["stock"]) + int(qty)
-        payload = f"{clean_barcode}|{produk['product_name']}|{produk['price']}|{stok_baru}"
+        product = self.product.find_one({"barcode": clean_barcode})
+        new_stock = int(product["stock"]) + int(qty)
+        payload = f"{clean_barcode}|{product['product_name']}|{product['price']}|{new_stock}"
         self.product.update_one(
             {"barcode": clean_barcode},
-            {"$set": {"stock": stok_baru, "_sig": self.generate_signature(payload)}}
+            {"$set": {"stock": new_stock, "_sig": self.generate_signature(payload)}}
         )
-        self.log_event("ITEM_DELETED", f"Item {clean_barcode} (qty {qty}) was removed with Manager authorization.")
+        self.log_event("ITEM_DELETED", f"Item '{clean_barcode}' (qty {qty}) voided with valid Manager Card.")
         return True
 
     def transaction(self, items, total, buy, change):
-        time = datetime.now().isoformat()
-        sig = self.generate_signature(f"{time}|{total}|{buy}|{change}|{len(items)}")
+        timestamp = datetime.now().isoformat()
+        sig = self.generate_signature(f"{timestamp}|{total}|{buy}|{change}|{len(items)}")
         self.transaction.insert_one({
-            "timestamp": time,
+            "timestamp": timestamp,
             "items": items,
             "total_amount": int(total),
             "cash_paid": int(buy),
             "change": int(change),
             "_sig": sig
         })
+
+    def verify_manager_only(self, card, barcode, qty):
+        clean_barcode = self.sanitize_input(barcode, r"^[A-Za-z0-9\-]{1,30}$")
+        owners = list(self.users.find({"role": "OWNER"}))
+        is_authorized = any(self.verify_credential(card, o.get("manager_card_hash", "")) for o in owners)
+        if not is_authorized:
+            self.log_event(
+                "UNAUTHORIZED_VOID_ATTEMPT",
+                f"Unauthorized cart removal attempt for barcode '{clean_barcode}' from IP {self.get_current_ip()}!"
+            )
+            return False
+        self.log_event("CART_ITEM_REMOVED", f"Item '{clean_barcode}' (qty {qty}) removed from customer cart with Manager verification.")
+        return True

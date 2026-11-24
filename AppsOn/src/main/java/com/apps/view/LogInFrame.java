@@ -1,160 +1,209 @@
 package com.apps.view;
 
+import java.awt.Color;
+import java.awt.Cursor;
+import java.awt.Font;
+import java.awt.GridLayout;
+import javax.swing.JButton;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JPasswordField;
+import javax.swing.JTextField;
+import com.apps.service.PythonBridge;
+
 /**
  *
  * @author Lukas Rivaldo
  */
 public class LogInFrame extends javax.swing.JFrame {
-    private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(LogInFrame.class.getName());
+
+    private JTextField txtUsername;
+    private JPasswordField txtPassword;
+    private JButton btnLogin;
+    private JButton btnSignUp;
+    private JButton btnOwnerPortal;
 
     public LogInFrame() {
-        initComponents();
-        cekWadahSetupAwal();
-        txtUsername.putClientProperty("JTextField.placeholderText", "username...");
-        txtPassword.putClientProperty("JTextField.placeholderText", "password...");
+        setTitle("POS & Warehouse System - Authentication");
+        setSize(420, 300);
+        setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+        setLayout(null);
+
+        JLabel lblTitle = new JLabel("SYSTEM AUTHENTICATION");
+        lblTitle.setFont(new Font("Segoe UI", Font.BOLD, 16));
+        lblTitle.setBounds(105, 20, 230, 25);
+        add(lblTitle);
+
+        JLabel lblUser = new JLabel("Username");
+        lblUser.setBounds(60, 65, 80, 25);
+        add(lblUser);
+
+        txtUsername = new JTextField();
+        txtUsername.setBounds(145, 65, 200, 30);
+        txtUsername.putClientProperty("JTextField.placeholderText", "Enter username...");
+        add(txtUsername);
+
+        JLabel lblPass = new JLabel("Password");
+        lblPass.setBounds(60, 108, 80, 25);
+        add(lblPass);
+
+        txtPassword = new JPasswordField();
+        txtPassword.setBounds(145, 108, 200, 30);
+        txtPassword.putClientProperty("JTextField.placeholderText", "Enter password...");
         txtPassword.putClientProperty("FlatLaf.style", "showRevealButton: true");
-        btnLogin.setBackground(new java.awt.Color(37, 99, 235));
-        btnLogin.setForeground(java.awt.Color.WHITE);
-        btnLogin.setFont(new java.awt.Font("Segoe UI", java.awt.Font.BOLD, 14));
-        btnLogin.setCursor(new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
+        add(txtPassword);
+
+        // Button Log In
+        btnLogin = new JButton("Log In");
+        btnLogin.setBounds(145, 155, 95, 34);
+        btnLogin.setBackground(new Color(37, 99, 235));
+        btnLogin.setForeground(Color.WHITE);
+        btnLogin.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        btnLogin.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        add(btnLogin);
+
+        // Button Sign Up (Employee)
+        btnSignUp = new JButton("Sign Up");
+        btnSignUp.setBounds(250, 155, 95, 34);
+        btnSignUp.setBackground(new Color(22, 163, 74));
+        btnSignUp.setForeground(Color.WHITE);
+        btnSignUp.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        btnSignUp.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        add(btnSignUp);
+
+        // Button Owner Setup Portal
+        btnOwnerPortal = new JButton("Owner Account Management");
+        btnOwnerPortal.setBounds(145, 202, 200, 28);
+        btnOwnerPortal.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        btnOwnerPortal.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        add(btnOwnerPortal);
+
+        // Action Listeners
+        btnLogin.addActionListener(e -> handleLogin());
+        txtPassword.addActionListener(e -> handleLogin());
+        btnSignUp.addActionListener(e -> handleEmployeeSignUp());
+        btnOwnerPortal.addActionListener(e -> new OwnerSetupFrame().setVisible(true));
     }
 
-    private void cekWadahSetupAwal() {
-        String status = com.apps.service.PythonBridge.runCommand("CHECK_SETUP");
-        if (status.equals("NEED_SETUP")) {
-            javax.swing.JTextField txtNewUser = new javax.swing.JTextField();
-            javax.swing.JPasswordField txtNewPass = new javax.swing.JPasswordField();
-            javax.swing.JPasswordField txtNewCard = new javax.swing.JPasswordField();
+    private void handleLogin() {
+        String user = txtUsername.getText().trim();
+        String pass = new String(txtPassword.getPassword());
 
-            Object[] form = {
-                "Welcome! Create Your Owner Account & Manager Card:",
-                "New Username (letters/numbers, min. 3 characters):", txtNewUser,
-                "Password Baru (min 8 karakter):", txtNewPass,
-                "New Manager Card Code (min. 4 characters):", txtNewCard
-            };
+        if (user.isEmpty() || pass.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Please enter both username and password!");
+            return;
+        }
 
-            int option = javax.swing.JOptionPane.showConfirmDialog(
-                this, form, "First-Time Security Setup", javax.swing.JOptionPane.OK_CANCEL_OPTION
-            );
+        String response = PythonBridge.runCommand("LOGIN", user, pass);
 
-            if (option == javax.swing.JOptionPane.OK_OPTION) {
-                String res = com.apps.service.PythonBridge.runCommand(
-                    "SETUP_OWNER",
-                    txtNewUser.getText().trim(),
-                    new String(txtNewPass.getPassword()),
-                    new String(txtNewCard.getPassword())
+        if (response.startsWith("OK|")) {
+            String[] parts = response.split("\\|", 4);
+            String role = parts[1];
+            PythonBridge.SESSION_TOKEN = parts[2];
+
+            if (parts.length > 3 && parts[3].startsWith("WARNING|")) {
+                String warningMsg = parts[4].substring(8).replace(" ; ", "\n- ");
+                JOptionPane.showMessageDialog(
+                    this,
+                    "SERVER SECURITY AWARENESS ALERT:\n- " + warningMsg + "\n\nPlease secure your server configuration.",
+                    "Security Warning",
+                    JOptionPane.WARNING_MESSAGE
                 );
-                if (res.equals("OK")) {
-                    javax.swing.JOptionPane.showMessageDialog(this, "Owner Account & Manager Card have been successfully created and encrypted!");
-                } else {
-                    javax.swing.JOptionPane.showMessageDialog(this, "Setup Fail: " + res);
-                    System.exit(0);
-                }
-            } else {
-                System.exit(0);
             }
-        } else if (!status.equals("READY")) {
-            javax.swing.JOptionPane.showMessageDialog(this, "Status Setup: [" + status + "]");
+
+            JOptionPane.showMessageDialog(this, "Welcome, " + user + " (" + role + ")!");
+            DashboardFrame dashboard = new DashboardFrame();
+            dashboard.setLocationRelativeTo(null);
+            dashboard.setVisible(true);
+            this.dispose();
+
+        } else if (response.equals("NOT_REGISTERED")) {
+            JOptionPane.showMessageDialog(
+                this,
+                "Account '" + user + "' is not registered in the database!\nPlease click 'Sign Up' first to create an Employee account.",
+                "Account Not Found",
+                JOptionPane.WARNING_MESSAGE
+            );
+        } else if (response.startsWith("IP_NOT_APPROVED|")) {
+            String ip = response.split("\\|")[1];
+            JOptionPane.showMessageDialog(
+                this,
+                "SERVER ACCESS DENIED!\nYour device IP (" + ip + ") is not authorized on the server.\nPlease contact the IT / Server Administrator to approve your IP address.",
+                "IT Approval Required",
+                JOptionPane.ERROR_MESSAGE
+            );
+        } else if (response.equals("LOCKED")) {
+            JOptionPane.showMessageDialog(
+                this,
+                "Account locked due to 5 consecutive failed login attempts!",
+                "Security Lockout",
+                JOptionPane.ERROR_MESSAGE
+            );
+        } else {
+            JOptionPane.showMessageDialog(this, "Login failed! Invalid username or password.", "Authentication Failed", JOptionPane.ERROR_MESSAGE);
         }
     }
 
+    private void handleEmployeeSignUp() {
+        JPanel panel = new JPanel(new GridLayout(2, 2, 8, 8));
+        JTextField txtNewUser = new JTextField();
+        JPasswordField txtNewPass = new JPasswordField();
+
+        panel.add(new JLabel("New Employee Username:"));
+        panel.add(txtNewUser);
+        panel.add(new JLabel("New Password (min 6 chars):"));
+        panel.add(txtNewPass);
+
+        int option = JOptionPane.showConfirmDialog(
+            this, panel, "Employee Sign Up", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
+        );
+
+        if (option == JOptionPane.OK_OPTION) {
+            String newUser = txtNewUser.getText().trim();
+            String newPass = new String(txtNewPass.getPassword());
+
+            if (newUser.isEmpty() || newPass.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Username and password cannot be empty!");
+                return;
+            }
+
+            String res = PythonBridge.runCommand("SIGNUP_EMPLOYEE", newUser, newPass);
+            if (res.equals("OK_AUTHORIZED")) {
+                JOptionPane.showMessageDialog(this, "Employee account '" + newUser + "' created! Your device IP is already authorized. You may Log In now.");
+            } else if (res.startsWith("PENDING_IT|")) {
+                String ip = res.split("\\|")[1];
+                JOptionPane.showMessageDialog(
+                    this,
+                    "Account '" + newUser + "' registered!\nHowever, your device IP (" + ip + ") is new and requires IT / Server Administrator approval before you can Log In.",
+                    "Pending IT Approval",
+                    JOptionPane.INFORMATION_MESSAGE
+                );
+            } else {
+                JOptionPane.showMessageDialog(this, "Sign Up failed:\n" + res, "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
     @SuppressWarnings("unchecked")
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
     private void initComponents() {
 
-        jLabel1 = new javax.swing.JLabel();
-        jLabel2 = new javax.swing.JLabel();
-        txtUsername = new javax.swing.JTextField();
-        txtPassword = new javax.swing.JPasswordField();
-        btnLogin = new javax.swing.JButton();
-
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
-
-        jLabel1.setText("Username");
-        jLabel1.setAutoscrolls(true);
-
-        jLabel2.setText("Password");
-        jLabel2.setAutoscrolls(true);
-
-        txtUsername.addActionListener(this::txtUsernameActionPerformed);
-
-        btnLogin.setText("Log In");
-        btnLogin.setAutoscrolls(true);
-        btnLogin.addActionListener(this::btnLoginActionPerformed);
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
         getContentPane().setLayout(layout);
         layout.setHorizontalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(layout.createSequentialGroup()
-                .addGap(81, 81, 81)
-                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                    .addComponent(btnLogin)
-                    .addGroup(layout.createSequentialGroup()
-                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                            .addComponent(jLabel1, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                            .addComponent(jLabel2, javax.swing.GroupLayout.PREFERRED_SIZE, 62, javax.swing.GroupLayout.PREFERRED_SIZE))
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                            .addComponent(txtPassword)
-                            .addComponent(txtUsername, javax.swing.GroupLayout.PREFERRED_SIZE, 150, javax.swing.GroupLayout.PREFERRED_SIZE))))
-                .addContainerGap(101, Short.MAX_VALUE))
+            .addGap(0, 470, Short.MAX_VALUE)
         );
         layout.setVerticalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(layout.createSequentialGroup()
-                .addGap(99, 99, 99)
-                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(jLabel1)
-                    .addComponent(txtUsername, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(jLabel2)
-                    .addComponent(txtPassword, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                .addComponent(btnLogin)
-                .addContainerGap(116, Short.MAX_VALUE))
+            .addGap(0, 300, Short.MAX_VALUE)
         );
 
         pack();
     }// </editor-fold>//GEN-END:initComponents
-
-    private void txtUsernameActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_txtUsernameActionPerformed
-        txtPassword.requestFocus();
-    }//GEN-LAST:event_txtUsernameActionPerformed
-
-    private void btnLoginActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnLoginActionPerformed
-        String user = txtUsername.getText().trim();
-        String pass = new String(txtPassword.getPassword());
-
-        String respon = com.apps.service.PythonBridge.runCommand("LOGIN", user, pass);
-
-        if (respon.startsWith("OK|")) {
-            String[] parts = respon.split("\\|", 3);
-            com.apps.service.PythonBridge.SESSION_TOKEN = parts[1];
-
-            if (parts.length > 2 && parts[2].startsWith("WARNING|")) {
-                String peringatan = parts[2].substring(8).replace(" ; ", "\n- ");
-                javax.swing.JOptionPane.showMessageDialog(
-                    this,
-                    "WARNING:\n- " + peringatan + "\n\nPlease improve your server security to prevent hacking.!",
-                    "Security Awareness Alert",
-                    javax.swing.JOptionPane.WARNING_MESSAGE
-                );
-            }
-
-            DashboardFrame dashboard = new DashboardFrame();
-            dashboard.setLocationRelativeTo(null);
-            dashboard.setVisible(true);
-            this.dispose();
-        } else if (respon.equals("LOCKED")) {
-            javax.swing.JOptionPane.showMessageDialog(this, "Account locked due to 5 failed attempts!", "Security Lock", javax.swing.JOptionPane.ERROR_MESSAGE);
-        } else if (respon.equals("DEVICE_BLOCKED")) {
-            javax.swing.JOptionPane.showMessageDialog(this, "This computer is not registered on the server!", "Unauthorized Device", javax.swing.JOptionPane.ERROR_MESSAGE);
-        } else {
-            javax.swing.JOptionPane.showMessageDialog(this, "Login failed! Response: " + respon);
-        }
-    }//GEN-LAST:event_btnLoginActionPerformed
     public static void main(String args[]) {
         try {
             com.formdev.flatlaf.FlatLightLaf.setup();
@@ -162,21 +211,15 @@ public class LogInFrame extends javax.swing.JFrame {
             javax.swing.UIManager.put("Component.arc", 10);
             javax.swing.UIManager.put("TextComponent.arc", 10);
         } catch (Exception ex) {
-            logger.log(java.util.logging.Level.SEVERE, null, ex);
+            ex.printStackTrace();
         }
 
         java.awt.EventQueue.invokeLater(() -> {
-            LogInFrame login = new LogInFrame();
-            login.setLocationRelativeTo(null);
-            login.setVisible(true);
+            new LogInFrame().setVisible(true);
         });
     }
+}
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
-    private javax.swing.JButton btnLogin;
-    private javax.swing.JLabel jLabel1;
-    private javax.swing.JLabel jLabel2;
-    private javax.swing.JPasswordField txtPassword;
-    private javax.swing.JTextField txtUsername;
     // End of variables declaration//GEN-END:variables
-}
+

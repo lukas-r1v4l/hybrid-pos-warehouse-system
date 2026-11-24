@@ -7,6 +7,7 @@ package com.apps.view;
 public class WarehouseFrame extends javax.swing.JFrame {
     private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(WarehouseFrame.class.getName());
     public WarehouseFrame() {
+        setTitle("Warehouse Frame");
         initComponents();
     }
     @SuppressWarnings("unchecked")
