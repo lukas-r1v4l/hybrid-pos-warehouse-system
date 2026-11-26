@@ -1,5 +1,6 @@
 import sys
 import json
+import base64
 from security_core import SecurityManager
 from input_stock import WarehouseManager
 from casier_system import CasierManager
@@ -13,6 +14,7 @@ def main():
     sec = SecurityManager()
 
     try:
+        # --- 1. PUBLIC ACTIONS (PRE-LOGIN / IT CONSOLE) ---
         if action == "SIGNUP_EMPLOYEE":
             res = sec.employee_signup(sys.argv[2], sys.argv[3])
             print(res)
@@ -53,22 +55,35 @@ def main():
         elif action == "LOGIN":
             auth_res = sec.authentication_user(sys.argv[2], sys.argv[3])
             if auth_res.startswith("OK|"):
-                role = auth_res.split("|")[1]
+                parts = auth_res.split("|")
+                role = parts[1]
+                position = parts[2]
                 token = sec.create_session_token(sys.argv[2])
                 audit = sec.audit_server_security()
-                print(f"OK|{role}|{token}|{audit}")
+                print(f"OK|{role}|{position}|{token}|{audit}")
             else:
                 print(auth_res)
             return
-        if len(sys.argv) < 3 or not sec.verify_session_token(sys.argv[2]):
-            sec.log_event("TOKEN_BYPASS_ATTEMPT", f"Unauthorized CLI access to '{action}' without a valid session token!")
+
+        # --- 2. PROTECTED ACTIONS (TOKEN + ROLE ENFORCEMENT) ---
+        if len(sys.argv) < 3:
             print("UNAUTHORIZED_SESSION")
             return
 
+        token = sys.argv[2]
         warehouse = WarehouseManager()
         casier = CasierManager()
 
         if action == "CHECK":
+            session_user = sec.verify_session_and_role(token, ["CASIER", "WAREHOUSE"])
+            if session_user is None:
+                sec.log_event("TOKEN_BYPASS_ATTEMPT", "Invalid/expired session token on CHECK!")
+                print("UNAUTHORIZED_SESSION")
+                return
+            if session_user == "FORBIDDEN_ROLE":
+                print("FORBIDDEN_ROLE")
+                return
+
             product = casier.product_search(sys.argv[3])
             if product:
                 if not sec.verify_product_integrity(product):
@@ -77,28 +92,97 @@ def main():
                     print(f"OK|{product['product_name']}|{product['price']}|{product['stock']}")
             else:
                 print("NOT_FOUND")
-        elif action == "VERIFY_MANAGER":
-            if casier.verify_manager_only(sys.argv[3], sys.argv[4], int(sys.argv[5])):
+
+        elif action in ["VERIFY_MANAGER", "DELETE_STOCK", "DELETE_ITEM", "TRANSACTION"]:
+            session_user = sec.verify_session_and_role(token, ["CASIER"])
+            if session_user is None:
+                sec.log_event("TOKEN_BYPASS_ATTEMPT", f"Invalid/expired session token on '{action}'!")
+                print("UNAUTHORIZED_SESSION")
+                return
+            if session_user == "FORBIDDEN_ROLE":
+                print("FORBIDDEN_ROLE|Access restricted to Cashier or Owner!")
+                return
+
+            actor = session_user["username"]
+
+            if action == "VERIFY_MANAGER":
+                if casier.verify_manager_only(sys.argv[3], sys.argv[4], int(sys.argv[5]), actor):
+                    print("OK")
+                else:
+                    print("UNAUTHORIZED")
+            elif action == "DELETE_STOCK":
+                casier.remove_stock(sys.argv[3], int(sys.argv[4]), actor)
                 print("OK")
-            else:
-                print("UNAUTHORIZED")
-        elif action == "RESTOCK":
-            warehouse.restock(sys.argv[3], int(sys.argv[4]))
-            print("OK")
-        elif action == "NEW_PRODUCT":
-            warehouse.product_save(sys.argv[3], sys.argv[4], int(sys.argv[5]), int(sys.argv[6]))
-            print("OK")
-        elif action == "DELETE_STOCK":
-            casier.remove_stock(sys.argv[3], int(sys.argv[4]))
-            print("OK")
-        elif action == "DELETE_ITEM":
-            if casier.verification_delete(sys.argv[3], sys.argv[4], int(sys.argv[5])):
+            elif action == "DELETE_ITEM":
+                if casier.verification_delete(sys.argv[3], sys.argv[4], int(sys.argv[5])):
+                    print("OK")
+                else:
+                    print("UNAUTHORIZED")
+            elif action == "TRANSACTION":
+                raw_json = base64.b64decode(sys.argv[3]).decode("utf-8")
+                receipt_info = casier.process_transaction(
+                    json.loads(raw_json),
+                    int(sys.argv[4]),
+                    int(sys.argv[5]),
+                    int(sys.argv[6]),
+                    actor
+                )
+                print(f"OK|{receipt_info}")
+
+
+        elif action in ["RESTOCK", "NEW_PRODUCT"]:
+            session_user = sec.verify_session_and_role(token, ["WAREHOUSE"])
+            if session_user is None:
+                sec.log_event("TOKEN_BYPASS_ATTEMPT", f"Invalid/expired session token on '{action}'!")
+                print("UNAUTHORIZED_SESSION")
+                return
+            if session_user == "FORBIDDEN_ROLE":
+                print("FORBIDDEN_ROLE|Access restricted to Warehouse or Owner!")
+                return
+
+            actor = session_user["username"]
+
+            if action == "RESTOCK":
+                warehouse.restock(sys.argv[3], int(sys.argv[4]), actor)
                 print("OK")
-            else:
-                print("UNAUTHORIZED")
-        elif action == "TRANSACTION":
-            casier.transaction(json.loads(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6]))
-            print("OK")
+            elif action == "NEW_PRODUCT":
+                warehouse.product_save(sys.argv[3], sys.argv[4], int(sys.argv[5]), int(sys.argv[6]), actor)
+                print("OK")
+        elif action in ["DAMAGED_STOCK", "EXPORT_WAREHOUSE"]:
+            session_user = sec.verify_session_and_role(token, ["WAREHOUSE"])
+            if session_user is None:
+                sec.log_event("TOKEN_BYPASS_ATTEMPT", f"Invalid/expired session token on '{action}'!")
+                print("UNAUTHORIZED_SESSION")
+                return
+            if session_user == "FORBIDDEN_ROLE":
+                print("FORBIDDEN_ROLE|Access restricted to Warehouse or Owner!")
+                return
+
+            actor = session_user["username"]
+
+            if action == "DAMAGED_STOCK":
+                note = sys.argv[5] if len(sys.argv) > 5 else "Damaged Goods"
+                warehouse.record_damaged(sys.argv[3], int(sys.argv[4]), actor, note)
+                print("OK")
+            elif action == "EXPORT_WAREHOUSE":
+                from report_manager import ReportManager
+                date_filter = sys.argv[3] if len(sys.argv) > 3 else ""
+                path = ReportManager().export_warehouse_history_csv(date_filter)
+                print(f"OK|{path}")
+
+        elif action == "EXPORT_ACCOUNTING":
+            session_user = sec.verify_session_and_role(token, ["OWNER"])
+            if session_user is None:
+                sec.log_event("TOKEN_BYPASS_ATTEMPT", "Invalid/expired session token on 'EXPORT_ACCOUNTING'!")
+                print("UNAUTHORIZED_SESSION")
+                return
+            if session_user == "FORBIDDEN_ROLE":
+                print("FORBIDDEN_ROLE|Only the Company Owner can export accounting reports!")
+                return
+
+            from report_manager import ReportManager
+            path = ReportManager().export_accounting_report(sys.argv[3], sys.argv[4])
+            print(f"OK|{path}")
         else:
             print("ERROR - Command not found!")
     except Exception as e:

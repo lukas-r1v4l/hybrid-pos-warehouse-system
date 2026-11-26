@@ -13,6 +13,9 @@ public class PythonBridge {
     private static final File SCRIPT_FILE = new File("../python_engine/bridge_cli.py").getAbsoluteFile();
 
     public static String SESSION_TOKEN = "";
+    public static String CURRENT_ROLE = "";
+    public static String CURRENT_POSITION = "";
+
 
     private static final Set<String> PUBLIC_ACTIONS = Set.of(
         "SIGNUP_EMPLOYEE", "SIGNUP_OWNER", "DELETE_OWNER", "IT_APPROVE_IP", "LOGIN",
@@ -22,7 +25,8 @@ public class PythonBridge {
     private static final Set<String> ALLOWED_ACTIONS = Set.of(
         "SIGNUP_EMPLOYEE", "SIGNUP_OWNER", "DELETE_OWNER", "IT_APPROVE_IP", "LOGIN",
         "IT_LOGIN", "IT_GET_DEVICES", "IT_REVOKE_IP", "IT_GET_LOGS",
-        "CHECK", "RESTOCK", "NEW_PRODUCT", "DELETE_STOCK", "DELETE_ITEM", "VERIFY_MANAGER", "TRANSACTION"
+        "CHECK", "RESTOCK", "NEW_PRODUCT", "DAMAGED_STOCK", "EXPORT_WAREHOUSE", "EXPORT_ACCOUNTING",
+        "DELETE_STOCK", "DELETE_ITEM", "VERIFY_MANAGER", "TRANSACTION"
     );
 
     public static String runCommand(String... args) {
@@ -45,7 +49,7 @@ public class PythonBridge {
                 command.add(args[i]);
             }
 
-ProcessBuilder pb = new ProcessBuilder(command);
+            ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(SCRIPT_FILE.getParentFile());
             pb.redirectErrorStream(true);
             Process process = pb.start();

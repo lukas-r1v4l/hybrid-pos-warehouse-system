@@ -108,73 +108,73 @@ class SecurityManager(DatabaseManager):
         return True
 
     def employee_signup(self, username, password):
-        clean_user = self.sanitize_input(username, r"^[A-Za-z0-9_]{3,20}$")
+        clean_user = self.sanitize_input(username, r"^(Casier|Warehouse)_[0-9]{1,5}$")
         if len(password) < 6:
             raise ValueError("Employee password must be at least 6 characters long!")
         if self.users.find_one({"username": clean_user}):
             raise ValueError(f"Username '{clean_user}' is already registered! Please Log In.")
+
+        position = "CASIER" if clean_user.startswith("Casier_") else "WAREHOUSE"
+
         ip_addr = self.get_current_ip()
         device_id = self.get_current_device_id()
+
         self.users.insert_one({
             "username": clean_user,
             "password_hash": self.hash_credential(password),
             "role": "EMPLOYEE",
+            "position": position,
             "registered_ip": ip_addr,
             "device_id": device_id,
             "created_at": datetime.now()
         })
+
         existing_dev = self.authorized_devices.find_one({"device_id": device_id, "ip_address": ip_addr})
         if existing_dev and existing_dev.get("status") == "AUTHORIZED":
-            self.log_event("EMPLOYEE_REGISTERED", f"Employee '{clean_user}' registered on authorized IP ({ip_addr}).")
-            return "OK_AUTHORIZED"
+            self.log_event("EMPLOYEE_REGISTERED", f"Employee '{clean_user}' ({position}) registered on authorized IP ({ip_addr}).")
+            return f"OK_AUTHORIZED|{position}"
         else:
             self.authorized_devices.update_one(
                 {"device_id": device_id},
                 {"$set": {
                     "ip_address": ip_addr,
                     "device_name": os.environ.get("COMPUTERNAME", "EMPLOYEE-PC"),
-                    "requested_by": clean_user,
+                    "requested_by": f"{clean_user} ({position})",
                     "status": "PENDING_IT_APPROVAL",
                     "requested_at": datetime.now()
                 }},
                 upsert=True
             )
-            self.log_event(
-                "PENDING_IP_APPROVAL",
-                f"Employee '{clean_user}' signed up from new IP ({ip_addr}). Awaiting IT approval."
-            )
-            return f"PENDING_IT|{ip_addr}"
+            self.log_event("PENDING_IP_APPROVAL", f"Employee '{clean_user}' ({position}) signed up from new IP ({ip_addr}).")
+            return f"PENDING_IT|{ip_addr}|{position}"
 
     def authentication_user(self, username, password):
-        clean_user = self.sanitize_input(username, r"^[A-Za-z0-9_]{3,20}$")
+        clean_user = self.sanitize_input(username, r"^[A-Za-z0-9_]{3,25}$")
         ip_addr = self.get_current_ip()
         device_id = self.get_current_device_id()
+
         user_doc = self.users.find_one({"username": clean_user})
         if not user_doc:
-            self.log_event(
-                "UNREGISTERED_LOGIN",
-                f"Unregistered username '{clean_user}' attempted login from IP {ip_addr}."
-            )
+            self.log_event("UNREGISTERED_LOGIN", f"Unregistered username '{clean_user}' attempted login from IP {ip_addr}.")
             return "NOT_REGISTERED"
+
         device = self.authorized_devices.find_one({"device_id": device_id, "ip_address": ip_addr})
         if not device or device.get("status") != "AUTHORIZED":
-            self.log_event(
-                "IP_NOT_APPROVED",
-                f"Access denied for '{clean_user}': IP {ip_addr} is not approved by IT!"
-            )
+            self.log_event("IP_NOT_APPROVED", f"Access denied for '{clean_user}': IP {ip_addr} is not approved by IT!")
             return f"IP_NOT_APPROVED|{ip_addr}"
+
         if user_doc.get("failed_attempts", 0) >= 5:
             return "LOCKED"
+
         if self.verify_credential(password, user_doc["password_hash"]):
             self.users.update_one({"username": clean_user}, {"$set": {"failed_attempts": 0}})
-            return f"OK|{user_doc.get('role', 'EMPLOYEE')}"
+            role = user_doc.get("role", "EMPLOYEE")
+            position = "ALL" if role == "OWNER" else user_doc.get("position", "CASIER")
+            return f"OK|{role}|{position}"
         else:
             attempts = user_doc.get("failed_attempts", 0) + 1
             self.users.update_one({"username": clean_user}, {"$set": {"failed_attempts": attempts}})
-            self.log_event(
-                "FAILED_LOGIN",
-                f"Wrong password attempt #{attempts} for '{clean_user}' from IP {ip_addr}."
-            )
+            self.log_event("FAILED_LOGIN", f"Wrong password attempt #{attempts} for '{clean_user}' from IP {ip_addr}.")
             return "LOCKED" if attempts >= 5 else "WRONG_PASSWORD"
 
     def it_approve_ip(self, target_ip):
@@ -195,9 +195,40 @@ class SecurityManager(DatabaseManager):
         token = secrets.token_hex(24)
         self.users.update_one(
             {"username": username},
-            {"$set": {"active_token": token, "token_device": self.get_current_device_id()}}
+            {"$set": {
+                "active_token": token,
+                "token_device": self.get_current_device_id(),
+                "token_created_at": datetime.now()
+            }}
         )
+        self.log_event("USER_LOGIN_SUCCESS", f"User '{username}' logged in and received a temporary session token.")
         return token
+
+    def verify_session_and_role(self, token, allowed_positions):
+        if not token or len(token) != 48:
+            return None
+        user = self.users.find_one({
+            "active_token": token,
+            "token_device": self.get_current_device_id()
+        })
+        if not user:
+            return None
+            
+        created_at = user.get("token_created_at")
+        if created_at and (datetime.now() - created_at).total_seconds() > 28800:
+            self.users.update_one({"_id": user["_id"]}, {"$unset": {"active_token": ""}})
+            return None
+
+        role = user.get("role", "EMPLOYEE")
+        position = "ALL" if role == "OWNER" else user.get("position", "")
+        if position != "ALL" and position not in allowed_positions:
+            self.log_event(
+                "ROLE_ACCESS_VIOLATION",
+                f"User '{user['username']}' (Position: {position}) attempted unauthorized action restricted to {allowed_positions}!"
+            )
+            return "FORBIDDEN_ROLE"
+
+        return user
 
     def verify_session_token(self, token):
         if not token or len(token) != 48:

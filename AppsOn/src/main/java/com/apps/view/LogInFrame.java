@@ -108,12 +108,15 @@ public class LogInFrame extends javax.swing.JFrame {
         String response = PythonBridge.runCommand("LOGIN", user, pass);
 
         if (response.startsWith("OK|")) {
-            String[] parts = response.split("\\|", 4);
+            String[] parts = response.split("\\|", 5);
             String role = parts[1];
-            PythonBridge.SESSION_TOKEN = parts[2];
+            String position = parts[2];
+            PythonBridge.CURRENT_ROLE = role;
+            PythonBridge.CURRENT_POSITION = position;
+            PythonBridge.SESSION_TOKEN = parts[3];
 
-            if (parts.length > 3 && parts[3].startsWith("WARNING|")) {
-                String warningMsg = parts[3].substring(8).replace(" ; ", "\n- ");
+            if (parts.length > 4 && parts[4].startsWith("WARNING|")) {
+                String warningMsg = parts[4].substring(8).replace(" ; ", "\n- ");
                 JOptionPane.showMessageDialog(
                     this,
                     "SERVER SECURITY AWARENESS ALERT:\n- " + warningMsg + "\n\nPlease secure your server configuration.",
@@ -122,7 +125,7 @@ public class LogInFrame extends javax.swing.JFrame {
                 );
             }
 
-            JOptionPane.showMessageDialog(this, "Welcome, " + user + " (" + role + ")!");
+            JOptionPane.showMessageDialog(this, "Welcome, " + user + "!\nRole: " + role + " | Position: " + position);
             DashboardFrame dashboard = new DashboardFrame();
             dashboard.setLocationRelativeTo(null);
             dashboard.setVisible(true);
@@ -156,11 +159,14 @@ public class LogInFrame extends javax.swing.JFrame {
     }
 
     private void handleEmployeeSignUp() {
-        JPanel panel = new JPanel(new GridLayout(2, 2, 8, 8));
+        JPanel panel = new JPanel(new GridLayout(3, 2, 8, 8));
         JTextField txtNewUser = new JTextField();
+        txtNewUser.putClientProperty("JTextField.placeholderText", "e.g., Casier_01 or Warehouse_01");
         JPasswordField txtNewPass = new JPasswordField();
 
-        panel.add(new JLabel("New Employee Username:"));
+        panel.add(new JLabel("Format Rule:"));
+        panel.add(new JLabel("Casier_<id> or Warehouse_<id>"));
+        panel.add(new JLabel("Employee Username:"));
         panel.add(txtNewUser);
         panel.add(new JLabel("New Password (min 6 chars):"));
         panel.add(txtNewPass);
@@ -173,19 +179,30 @@ public class LogInFrame extends javax.swing.JFrame {
             String newUser = txtNewUser.getText().trim();
             String newPass = new String(txtNewPass.getPassword());
 
-            if (newUser.isEmpty() || newPass.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "Username and password cannot be empty!");
+            if (!newUser.matches("^(Casier|Warehouse)_[0-9]{1,5}$")) {
+                JOptionPane.showMessageDialog(
+                    this,
+                    "Invalid Username Format!\nUsername must start with 'Casier_' or 'Warehouse_' followed by employee number (e.g., Casier_01, Warehouse_02).",
+                    "Format Error",
+                    JOptionPane.WARNING_MESSAGE
+                );
+                return;
+            }
+
+            if (newPass.length() < 6) {
+                JOptionPane.showMessageDialog(this, "Password must be at least 6 characters long!");
                 return;
             }
 
             String res = PythonBridge.runCommand("SIGNUP_EMPLOYEE", newUser, newPass);
-            if (res.equals("OK_AUTHORIZED")) {
-                JOptionPane.showMessageDialog(this, "Employee account '" + newUser + "' created! Your device IP is already authorized. You may Log In now.");
+            if (res.startsWith("OK_AUTHORIZED|")) {
+                String pos = res.split("\\|")[1];
+                JOptionPane.showMessageDialog(this, "Account '" + newUser + "' (Position: " + pos + ") created!\nYour device IP is already authorized. You may Log In now.");
             } else if (res.startsWith("PENDING_IT|")) {
-                String ip = res.split("\\|")[1];
+                String[] info = res.split("\\|");
                 JOptionPane.showMessageDialog(
                     this,
-                    "Account '" + newUser + "' registered!\nHowever, your device IP (" + ip + ") is new and requires IT / Server Administrator approval before you can Log In.",
+                    "Account '" + newUser + "' (Position: " + info[2] + ") registered!\nYour device IP (" + info[1] + ") requires IT Administrator approval before you can Log In.",
                     "Pending IT Approval",
                     JOptionPane.INFORMATION_MESSAGE
                 );

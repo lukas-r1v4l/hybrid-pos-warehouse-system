@@ -216,7 +216,7 @@ public class CasierFrame extends javax.swing.JFrame {
         dialogDelete.setVisible(true);
     }
 
-    private void openWindowBuy() {
+        private void openWindowBuy() {
         javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) tblBelanja.getModel();
         if (model.getRowCount() == 0) {
             javax.swing.JOptionPane.showMessageDialog(this, "No items have been purchased yet!");
@@ -257,30 +257,32 @@ public class CasierFrame extends javax.swing.JFrame {
                 int kembalian = uangBayar - total;
                 StringBuilder itemsJson = new StringBuilder("[");
                 for (int i = 0; i < model.getRowCount(); i++) {
-                    String itemBarcode = model.getValueAt(i, 0).toString();
-                    String itemQty = model.getValueAt(i, 3).toString();
-
-                    // Deduct stock in MongoDB only after payment is confirmed
-                    String stockRes = com.apps.service.PythonBridge.runCommand("DELETE_STOCK", itemBarcode, itemQty);
-                    if (!stockRes.equals("OK")) {
-                        javax.swing.JOptionPane.showMessageDialog(dialogBuy, "Stock update failed for " + itemBarcode + ": " + stockRes, "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
-                        return;
-                    }
-
                     if (i > 0) itemsJson.append(",");
                     itemsJson.append(String.format(
                         "{\"barcode\":\"%s\",\"product_name\":\"%s\",\"price\":%s,\"qty\":%s,\"subtotal\":%s}",
-                        itemBarcode, model.getValueAt(i, 1),
-                        model.getValueAt(i, 2), itemQty, model.getValueAt(i, 4)
+                        model.getValueAt(i, 0), model.getValueAt(i, 1),
+                        model.getValueAt(i, 2), model.getValueAt(i, 3), model.getValueAt(i, 4)
                     ));
                 }
                 itemsJson.append("]");
-                com.apps.service.PythonBridge.runCommand(
-                    "TRANSACTION", itemsJson.toString(),
+
+                String encodedItems = java.util.Base64.getEncoder().encodeToString(
+                    itemsJson.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                );
+
+                String trxRes = com.apps.service.PythonBridge.runCommand(
+                    "TRANSACTION", encodedItems,
                     String.valueOf(total), String.valueOf(uangBayar), String.valueOf(kembalian)
                 );
-                dialogBuy.dispose();
-                openWindowKembalian(kembalian);
+
+                if (trxRes.startsWith("OK|")) {
+                    // Format: OK|trx_id|dateTimeDay|cashierUser|csvPath
+                    String[] info = trxRes.split("\\|", 5);
+                    dialogBuy.dispose();
+                    openReceiptPrintoutWindow(info[1], info[2], info[3], info[4], model, total, uangBayar, kembalian);
+                } else {
+                    javax.swing.JOptionPane.showMessageDialog(dialogBuy, "Transaction failed:\n" + trxRes, "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
+                }
             } catch (NumberFormatException ex) {
                 javax.swing.JOptionPane.showMessageDialog(dialogBuy, "Enter a valid monetary amount!");
             }
@@ -288,36 +290,75 @@ public class CasierFrame extends javax.swing.JFrame {
         dialogBuy.setVisible(true);
     }
 
-    private void openWindowKembalian(int change) {
-        javax.swing.JDialog dialogChange = new javax.swing.JDialog(this, "Transaction Done", true);
-        dialogChange.setSize(360, 200);
-        dialogChange.setLocationRelativeTo(this);
-        dialogChange.setLayout(new java.awt.GridLayout(3, 1, 10, 10));
-        ((javax.swing.JPanel) dialogChange.getContentPane()).setBorder(javax.swing.BorderFactory.createEmptyBorder(20, 20, 20, 20));
+    private void openReceiptPrintoutWindow(String trxId, String dateTimeDay, String cashierUser, String csvPath, javax.swing.table.DefaultTableModel model, int totalAmt, int paidAmt, int changeAmt) {
+        javax.swing.JDialog dialogReceipt = new javax.swing.JDialog(this, "Customer Receipt Printout", true);
+        dialogReceipt.setSize(430, 520);
+        dialogReceipt.setLocationRelativeTo(this);
+        dialogReceipt.setLayout(new java.awt.BorderLayout(10, 10));
 
-        javax.swing.JLabel lblTitle = new javax.swing.JLabel("Total Change for Customer:", javax.swing.SwingConstants.CENTER);
-        javax.swing.JLabel lblNilaiKembalian = new javax.swing.JLabel("Rp " + change, javax.swing.SwingConstants.CENTER);
-        lblNilaiKembalian.setFont(new java.awt.Font("Segoe UI", java.awt.Font.BOLD, 24));
-        lblNilaiKembalian.setForeground(new java.awt.Color(22, 163, 74));
+        StringBuilder sb = new StringBuilder();
+        sb.append("==========================================\n");
+        sb.append("           STORE SALES RECEIPT            \n");
+        sb.append("==========================================\n");
+        sb.append("Receipt ID : ").append(trxId).append("\n");
+        sb.append("Date / Day : ").append(dateTimeDay).append("\n");
+        sb.append("Cashier    : ").append(cashierUser).append("\n");
+        sb.append("------------------------------------------\n");
+        sb.append(String.format("%-18s %4s %15s\n", "Item", "Qty", "Subtotal"));
+        sb.append("------------------------------------------\n");
 
-        javax.swing.JButton btnSelesaiSemua = new javax.swing.JButton("Done");
-        btnSelesaiSemua.setBackground(new java.awt.Color(37, 99, 235));
-        btnSelesaiSemua.setForeground(java.awt.Color.WHITE);
-        btnSelesaiSemua.setFont(new java.awt.Font("Segoe UI", java.awt.Font.BOLD, 14));
+        for (int i = 0; i < model.getRowCount(); i++) {
+            String itemName = model.getValueAt(i, 1).toString();
+            if (itemName.length() > 18) itemName = itemName.substring(0, 18);
+            String qty = model.getValueAt(i, 3).toString();
+            String sub = model.getValueAt(i, 4).toString();
+            sb.append(String.format("%-18s %4s %15s\n", itemName, qty, "Rp " + sub));
+        }
 
-        dialogChange.add(lblTitle);
-        dialogChange.add(lblNilaiKembalian);
-        dialogChange.add(btnSelesaiSemua);
+        sb.append("------------------------------------------\n");
+        sb.append(String.format("%-23s %15s\n", "TOTAL:", "Rp " + totalAmt));
+        sb.append(String.format("%-23s %15s\n", "CASH PAID:", "Rp " + paidAmt));
+        sb.append(String.format("%-23s %15s\n", "CHANGE:", "Rp " + changeAmt));
+        sb.append("==========================================\n");
+        sb.append("     Thank you for shopping with us!      \n");
+        sb.append("==========================================\n\n");
+        sb.append("CSV Saved at:\n").append(csvPath);
 
-        btnSelesaiSemua.addActionListener(e -> {
-            ((javax.swing.table.DefaultTableModel) tblBelanja.getModel()).setRowCount(0);
-            total = 0;
-            lblTotal.setText("Total: Rp 0");
-            dialogChange.dispose();
+        javax.swing.JTextArea txtReceipt = new javax.swing.JTextArea(sb.toString());
+        txtReceipt.setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 12));
+        txtReceipt.setEditable(false);
+        txtReceipt.setBorder(javax.swing.BorderFactory.createEmptyBorder(10, 12, 10, 12));
+
+        javax.swing.JPanel panelBtns = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT));
+        javax.swing.JButton btnPrint = new javax.swing.JButton("Print Receipt");
+        btnPrint.setBackground(new java.awt.Color(37, 99, 235));
+        btnPrint.setForeground(java.awt.Color.WHITE);
+
+        javax.swing.JButton btnDone = new javax.swing.JButton("Done");
+        btnDone.setBackground(new java.awt.Color(22, 163, 74));
+        btnDone.setForeground(java.awt.Color.WHITE);
+
+        btnPrint.addActionListener(e -> {
+            try {
+                txtReceipt.print();
+            } catch (java.awt.print.PrinterException ex) {
+                javax.swing.JOptionPane.showMessageDialog(dialogReceipt, "Printer error: " + ex.getMessage());
+            }
+        });
+
+        btnDone.addActionListener(e -> {
+            model.setRowCount(0);
+            subTotal();
+            dialogReceipt.dispose();
             txtBarcode.requestFocus();
         });
 
-        dialogChange.setVisible(true);
+        panelBtns.add(btnPrint);
+        panelBtns.add(btnDone);
+
+        dialogReceipt.add(new javax.swing.JScrollPane(txtReceipt), java.awt.BorderLayout.CENTER);
+        dialogReceipt.add(panelBtns, java.awt.BorderLayout.SOUTH);
+        dialogReceipt.setVisible(true);
     }
 
     private void btnBuyActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnBuyActionPerformed

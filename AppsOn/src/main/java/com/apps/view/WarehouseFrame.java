@@ -7,8 +7,57 @@ package com.apps.view;
 public class WarehouseFrame extends javax.swing.JFrame {
     private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(WarehouseFrame.class.getName());
     public WarehouseFrame() {
-        setTitle("Warehouse Frame");
+        setTitle("Warehouse Management System");
         initComponents();
+        setupCustomLayout();
+        setLocationRelativeTo(null);
+    }
+    private void setupCustomLayout() {
+        getContentPane().removeAll();
+        setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
+
+        javax.swing.JButton btnDamaged = new javax.swing.JButton("DAMAGED GOODS");
+        btnDamaged.setBackground(new java.awt.Color(220, 38, 38));
+        btnDamaged.setForeground(java.awt.Color.WHITE);
+        btnDamaged.addActionListener(e -> openWindowDamaged());
+
+        javax.swing.JButton btnExportWh = new javax.swing.JButton("EXPORT HISTORY (.CSV)");
+        btnExportWh.setBackground(new java.awt.Color(37, 99, 235));
+        btnExportWh.setForeground(java.awt.Color.WHITE);
+        btnExportWh.addActionListener(e -> exportWarehouseHistory());
+
+        btnNewProduct.setText("NEW PRODUCT");
+
+        javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
+        getContentPane().setLayout(layout);
+        layout.setHorizontalGroup(
+            layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(layout.createSequentialGroup()
+                .addGap(105, 105, 105)
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addComponent(btnRestock, javax.swing.GroupLayout.DEFAULT_SIZE, 190, Short.MAX_VALUE)
+                    .addComponent(btnNewProduct, javax.swing.GroupLayout.DEFAULT_SIZE, 190, Short.MAX_VALUE)
+                    .addComponent(btnDamaged, javax.swing.GroupLayout.DEFAULT_SIZE, 190, Short.MAX_VALUE)
+                    .addComponent(btnExportWh, javax.swing.GroupLayout.DEFAULT_SIZE, 190, Short.MAX_VALUE))
+                .addContainerGap(105, Short.MAX_VALUE))
+        );
+        layout.setVerticalGroup(
+            layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(layout.createSequentialGroup()
+                .addGap(55, 55, 55)
+                .addComponent(btnRestock, javax.swing.GroupLayout.PREFERRED_SIZE, 34, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(12, 12, 12)
+                .addComponent(btnNewProduct, javax.swing.GroupLayout.PREFERRED_SIZE, 34, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(12, 12, 12)
+                .addComponent(btnDamaged, javax.swing.GroupLayout.PREFERRED_SIZE, 34, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(12, 12, 12)
+                .addComponent(btnExportWh, javax.swing.GroupLayout.PREFERRED_SIZE, 34, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(65, Short.MAX_VALUE))
+        );
+
+        pack();
+        revalidate();
+        repaint();
     }
     @SuppressWarnings("unchecked")
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
@@ -132,10 +181,6 @@ public class WarehouseFrame extends javax.swing.JFrame {
             if (tblRestock.isEditing()) {
                 tblRestock.getCellEditor().stopCellEditing();
             }
-            if (modelRestock.getRowCount() == 0) {
-                javax.swing.JOptionPane.showMessageDialog(dialogRestock, "The restock list is still empty! Click 'Add to List' first.");
-                return;
-            }
             for (int i = 0; i < modelRestock.getRowCount(); i++) {
                 String kode = modelRestock.getValueAt(i, 0).toString();
                 String qty = modelRestock.getValueAt(i, 2).toString();
@@ -145,7 +190,7 @@ public class WarehouseFrame extends javax.swing.JFrame {
                     return;
                 }
             }
-            javax.swing.JOptionPane.showMessageDialog(dialogRestock, "All restock data has been successfully saved to MongoDB!");
+            javax.swing.JOptionPane.showMessageDialog(dialogRestock, "All restock data has been successfully saved!");
             dialogRestock.dispose();
         });
         dialogRestock.setVisible(true);
@@ -205,7 +250,39 @@ public class WarehouseFrame extends javax.swing.JFrame {
         });
         dialogNew.setVisible(true);
     }
+    
+    private void openWindowDamaged() {
+        String barcode = javax.swing.JOptionPane.showInputDialog(this, "Enter Damaged Product Barcode:");
+        if (barcode == null || barcode.trim().isEmpty()) return;
 
+        String qty = javax.swing.JOptionPane.showInputDialog(this, "Enter Damaged Quantity:");
+        if (qty == null || qty.trim().isEmpty()) return;
+
+        String note = javax.swing.JOptionPane.showInputDialog(this, "Damage Reason / Supplier Note:", "Damaged in Warehouse");
+        String res = com.apps.service.PythonBridge.runCommand(
+            "DAMAGED_STOCK", barcode.trim(), qty.trim(), note != null ? note.trim() : "Damaged"
+        );
+
+        if (res.equals("OK")) {
+            javax.swing.JOptionPane.showMessageDialog(this, "Damaged stock recorded and deducted from inventory!");
+        } else {
+            javax.swing.JOptionPane.showMessageDialog(this, "Failed:\n" + res, "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    
+    private void exportWarehouseHistory() {
+        String dateFilter = javax.swing.JOptionPane.showInputDialog(
+            this, "Enter Date Filter (YYYY-MM-DD) or leave blank for ALL history:", "2026-11-26"
+        );
+        if (dateFilter != null) {
+            String res = com.apps.service.PythonBridge.runCommand("EXPORT_WAREHOUSE", dateFilter.trim());
+            if (res.startsWith("OK|")) {
+                javax.swing.JOptionPane.showMessageDialog(this, "Warehouse History CSV saved at:\n" + res.split("\\|", 2));
+            } else {
+                javax.swing.JOptionPane.showMessageDialog(this, "Export failed:\n" + res, "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
     private void btnNewProductActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnNewProductActionPerformed
         openWindowNewProduct();
     }//GEN-LAST:event_btnNewProductActionPerformed
